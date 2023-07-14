@@ -1,67 +1,106 @@
-import tensorflow as tf
+import cv2
+import torch
+import numpy as np
+import math
 
-# Psuedocode - not final
-# Assuming head_locations is a list of head locations or keypoints
+# SSL certificate issues fix
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
-head_orientations = []
+def detect_head_centers(image_path):
+    # Load YOLOv5 model
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
 
-for head_location in head_locations:
-    # Extract head patch from the image
-    head_patch = tf.image.crop_and_resize(image, head_location, crop_size)
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
 
-    # Apply convolutional layers to capture head orientations
-    conv1 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(head_patch)
-    conv2 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(conv1)
-    flatten = tf.keras.layers.Flatten()(conv2)
+    # Read image
+    image = cv2.imread(image_path)
 
-    # Output layer with sigmoid activation to predict head orientation
-    head_orientation = tf.keras.layers.Dense(1, activation='sigmoid')(flatten)
+    # Get image height and width
+    image_height, image_width = image.shape[:2]
 
-    head_orientations.append(head_orientation)
+    # Perform head detection
+    results = model(image)
 
-# Combine all head orientation predictions
-head_orientations_combined = tf.concat(head_orientations, axis=1)
+    # Retrieve bounding boxes and class labels
+    boxes = results.xyxy[0].cpu().numpy()
+    class_labels = results.names[0]
+
+    if 'person' not in class_labels:
+        print("No person class detected in the image.")
+        return [], image_height, image_width
+
+    # Filter detections to keep only "person" class
+    person_boxes = boxes[results.pred[0][:, -1] == class_labels.index('person')]
+
+    if len(person_boxes) == 0:
+        print("No person found in the image.")
+        return [], image_height, image_width
+
+    head_centers = []
+    # Draw bounding boxes on the image and get head centers
+    for box in person_boxes:
+        x1, y1, x2, y2, _, __ = box
+        cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+
+        # Calculate center coordinates
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        head_centers.append((center_x, center_y))
+
+    cv2.imshow('Detection', image)
+    cv2.waitKey(0)
+
+    print("Head Centers:", head_centers)
+    return head_centers, image_height, image_width
 
 
-# Proximity Branch
-proximity_scores = []
+# Define the function to calculate average proximity using the median of pairwise distances
+def calculate_median_proximity(head_centers, image_width, image_height):
+    # Check if no head centers were detected
+    if len(head_centers) == 0:
+        print("No head centers found.")
+        return 0
 
-for head_location in head_locations:
-    # Extract head patch from the image
-    head_patch = tf.image.crop_and_resize(image, head_location, crop_size)
+    # Initialize a list to store distances
+    distances = []
 
-    # Apply convolutional layers to capture proximity information
-    conv1 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(head_patch)
-    conv2 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(conv1)
-    flatten = tf.keras.layers.Flatten()(conv2)
+    # Calculate pairwise Euclidean distance for all head centers
+    for i in range(len(head_centers)):
+        for j in range(i+1, len(head_centers)):
+            # Calculate Euclidean distance
+            distance = np.sqrt((head_centers[i][0] - head_centers[j][0])**2 + (head_centers[i][1] - head_centers[j][1])**2)
+            
+            # Add this distance to the distances list
+            distances.append(distance)
 
-    # Output layer with sigmoid activation to predict proximity level
-    proximity_score = tf.keras.layers.Dense(1, activation='sigmoid')(flatten)
+    # Calculate median distance
+    if len(distances) > 0:
+        median_distance = np.median(distances)
+    else:
+        print("Only one person detected, cannot calculate proximity.")
+        return 0
 
-    proximity_scores.append(proximity_score)
+    # Normalize the median distance using the diagonal length of the image (max possible distance)
+    max_possible_distance = np.sqrt(image_width**2 + image_height**2)
+    normalized_distance = median_distance / max_possible_distance
 
-# Combine all proximity scores
-proximity_scores_combined = tf.concat(proximity_scores, axis=1)
+    # Higher score indicates people are closer
+    score = 1 - normalized_distance
+    return score
+
+# Calculate the proximity score using the new function
+
+head_positions, image_height, image_width = detect_head_centers("./data/unengaged.jpg")
+median_proximity = calculate_median_proximity(head_positions, image_width, image_height)
+print(median_proximity)
 
 
 
-# Assuming sequence_images is a list of top-down crowd images
-# Movement Branch
-movement_scores = []
 
-for image in sequence_images:
-    # Apply convolutional layers to capture spatio-temporal features
-    conv1 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(image)
-    conv2 = tf.keras.layers.Conv2D(filters, kernel_size, activation='relu')(conv1)
-    flatten = tf.keras.layers.Flatten()(conv2)
 
-    # Use LSTM or GRU recurrent layer to capture temporal information
-    lstm = tf.keras.layers.LSTM(units)(flatten)
 
-    # Output layer with sigmoid activation to predict movement level
-    movement_score = tf.keras.layers.Dense(1, activation='sigmoid')(lstm)
 
-    movement_scores.append(movement_score)
 
-# Combine all movement scores - main purpose of this file
-movement_scores_combined = tf.concat(movement_scores, axis=1)
