@@ -7,57 +7,66 @@ import math
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
+from PIL import Image
+import numpy as np
+from roboflow import Roboflow
+
+def resize_image(image_path):
+    img = Image.open(image_path)
+
+    # Specify the maximum dimensions for resizing
+    max_width = 800
+    max_height = 800
+
+    # Calculate the aspect ratio
+    width_ratio = max_width / img.width
+    height_ratio = max_height / img.height
+
+    # Choose the smaller ratio to ensure the image fits within the desired dimensions
+    resize_ratio = min(width_ratio, height_ratio)
+
+    # Calculate the new width and height
+    new_width = int(img.width * resize_ratio)
+    new_height = int(img.height * resize_ratio)
+
+    # Resize the image
+    resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
+
+    # Save the resized image
+    resized_img.save(image_path)
+
 def detect_head_centers(image_path):
-    # Load YOLOv5 model
-    model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+    # Initialize Roboflow
+    rf = Roboflow(api_key="K9A8vdmXXNpdi3lmHVBI")
+    project = rf.workspace().project("people_counterv0")
+    model = project.version(1).model
 
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
+    resize_image(image_path)
 
-    # Read image
-    image = cv2.imread(image_path)
+    # Run the model prediction
+    prediction = model.predict(image_path, confidence=40, overlap=30).json()
 
-    # Get image height and width
-    image_height, image_width = image.shape[:2]
+    # Get the image width and height from the prediction dictionary
+    image_width = int(prediction['image']['width'])
+    image_height = int(prediction['image']['height'])
 
-    # Perform head detection
-    results = model(image)
+    # Initialize an empty list to hold the center coordinates
+    centers = []
 
-    # Retrieve bounding boxes and class labels
-    boxes = results.xyxy[0].cpu().numpy()
-    class_labels = results.names[0]
+    # Iterate over each detection in the predictions
+    for obj in prediction['predictions']:
+        # Calculate the center of the bounding box
+        x_center = (obj['x'] + obj['width']) / 2
+        y_center = (obj['y'] + obj['height']) / 2
 
-    if 'person' not in class_labels:
-        print("No person class detected in the image.")
-        return [], image_height, image_width
+        # Append the center coordinates to the list
+        centers.append((x_center, y_center))
 
-    # Filter detections to keep only "person" class
-    person_boxes = boxes[results.pred[0][:, -1] == class_labels.index('person')]
+    # Convert the list to a NumPy array for easier manipulation
+    centers = np.array(centers)
 
-    if len(person_boxes) == 0:
-        print("No person found in the image.")
-        return [], image_height, image_width
+    return centers, image_width, image_height
 
-    head_centers = []
-    # Draw bounding boxes on the image and get head centers
-    for box in person_boxes:
-        x1, y1, x2, y2, _, __ = box
-        cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-
-        # Calculate center coordinates
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
-        head_centers.append((center_x, center_y))
-
-    cv2.imshow('Detection', image)
-    cv2.waitKey(0)
-
-    print("Head Centers:", head_centers)
-    return head_centers, image_height, image_width
-
-
-# Define the function to calculate average proximity using the median of pairwise distances
 def calculate_median_proximity(head_centers, image_width, image_height):
     # Check if no head centers were detected
     if len(head_centers) == 0:
@@ -89,13 +98,19 @@ def calculate_median_proximity(head_centers, image_width, image_height):
 
     # Higher score indicates people are closer
     score = 1 - normalized_distance
+    scorepercent = score*100
+
+    print(score)
+    print(scorepercent)
     return score
 
 # Calculate the proximity score using the new function
 
-head_positions, image_height, image_width = detect_head_centers("./data/unengaged.jpg")
+# Calculate the proximity score using the updated functions
+head_positions, image_width, image_height = detect_head_centers("./data/slightangle.jpeg")
+
 median_proximity = calculate_median_proximity(head_positions, image_width, image_height)
-print(median_proximity)
+
 
 
 

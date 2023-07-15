@@ -7,54 +7,39 @@ import math
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
+from roboflow import Roboflow
+import numpy as np
+
 def detect_head_centers(image_path):
-    # Load YOLOv5 model
-    model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+    # Initialize Roboflow
+    rf = Roboflow(api_key="K9A8vdmXXNpdi3lmHVBI")
+    project = rf.workspace().project("people_counterv0")
+    model = project.version(1).model
 
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model.to(device)
+    # Run the model prediction
+    prediction = model.predict(image_path, confidence=40, overlap=30).json()
 
-    # Read image
-    image = cv2.imread(image_path)
+    # Initialize an empty list to hold the center coordinates
+    centers = []
 
-    # Get image height and width
-    image_height, image_width = image.shape[:2]
+    # Iterate over each detection in the predictions
+    for obj in prediction['objects']:
+        # Calculate the center of the bounding box
+        x_center = (obj['x'] + obj['width']) / 2
+        y_center = (obj['y'] + obj['height']) / 2
 
-    # Perform head detection
-    results = model(image)
+        # Append the center coordinates to the list
+        centers.append((x_center, y_center))
 
-    # Retrieve bounding boxes and class labels
-    boxes = results.xyxy[0].cpu().numpy()
-    class_labels = results.names[0]
+    # Convert the list to a NumPy array for easier manipulation
+    centers = np.array(centers)
 
-    if 'person' not in class_labels:
-        print("No person class detected in the image.")
-        return [], image_height, image_width
+    return centers
 
-    # Filter detections to keep only "person" class
-    person_boxes = boxes[results.pred[0][:, -1] == class_labels.index('person')]
-
-    if len(person_boxes) == 0:
-        print("No person found in the image.")
-        return [], image_height, image_width
-
-    head_centers = []
-    # Draw bounding boxes on the image and get head centers
-    for box in person_boxes:
-        x1, y1, x2, y2, _, __ = box
-        cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-
-        # Calculate center coordinates
-        center_x = (x1 + x2) / 2
-        center_y = (y1 + y2) / 2
-        head_centers.append((center_x, center_y))
-
-    cv2.imshow('Detection', image)
-    cv2.waitKey(0)
-
-    print("Head Centers:", head_centers)
-    return head_centers, image_height, image_width, len(person_boxes)
+# Test the function
+image_path = "" 
+head_centers = detect_head_centers(image_path)
+print(head_centers)
 
 
 # Define the function to calculate average proximity using the median of pairwise distances
