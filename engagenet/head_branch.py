@@ -37,7 +37,7 @@ def detect_head_centers(image_path):
     return centers
 
 # Test the function
-image_path = "" 
+image_path = "your_image.jpg"  # Replace with the path to your image
 head_centers = detect_head_centers(image_path)
 print(head_centers)
 

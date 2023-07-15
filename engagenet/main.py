@@ -62,12 +62,14 @@ def detect_head_centers(image_path):
         # Append the center coordinates to the list
         centers.append((x_center, y_center))
 
+    person_boxes = len(centers)
+
     # Convert the list to a NumPy array for easier manipulation
     centers = np.array(centers)
 
-    return centers, image_width, image_height
+    return centers, image_width, image_height, person_boxes
 
-def calculate_median_proximity(head_centers, image_width, image_height):
+def calculate_median_proximity(head_centers, image_width, image_height, head_count):
     # Check if no head centers were detected
     if len(head_centers) == 0:
         print("No head centers found.")
@@ -98,24 +100,20 @@ def calculate_median_proximity(head_centers, image_width, image_height):
 
     # Higher score indicates people are closer
     score = 1 - normalized_distance
-    scorepercent = score*100
 
     print(score)
-    print(scorepercent)
-    return score
+
+    normalized_count = min(head_count / 100, 1)
+
+    engagement_score = 0.1 * normalized_count + 0.9 * score
+    print("Engagement Score: ", engagement_score)
+
+    return engagement_score   
 
 # Calculate the proximity score using the new function
 
 # Calculate the proximity score using the updated functions
-head_positions, image_width, image_height = detect_head_centers("./data/slightangle.jpeg")
+head_positions, image_width, image_height, numppl= detect_head_centers("./data/slightangle.jpeg")
 
-median_proximity = calculate_median_proximity(head_positions, image_width, image_height)
-
-
-
-
-
-
-
-
+median_proximity = calculate_median_proximity(head_positions, image_width, image_height, numppl)
 
