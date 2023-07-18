@@ -4,7 +4,7 @@ YOU CANT JUST USE angles also PROXIMITY AND COORDINATES from the algorithm
 
 This implementation mixes clustering, distance matrices (proximity) with head angle iteration threshold
 
-Mixes proxmity with facing inwards head angle scores
+Mixes proxmity with facing inwards head angle scores - all the main code in one
 
 """
 from sklearn.cluster import KMeans

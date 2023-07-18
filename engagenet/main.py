@@ -69,6 +69,77 @@ def detect_head_centers(image_path):
 
     return centers, image_width, image_height, person_boxes
 
+import cv2
+import torch
+import numpy as np
+import math
+
+# SSL certificate issues fix
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+from PIL import Image
+import numpy as np
+from roboflow import Roboflow
+
+def resize_image(image_path):
+    img = Image.open(image_path)
+
+    # Specify the maximum dimensions for resizing
+    max_width = 800
+    max_height = 800
+
+    # Calculate the aspect ratio
+    width_ratio = max_width / img.width
+    height_ratio = max_height / img.height
+
+    # Choose the smaller ratio to ensure the image fits within the desired dimensions
+    resize_ratio = min(width_ratio, height_ratio)
+
+    # Calculate the new width and height
+    new_width = int(img.width * resize_ratio)
+    new_height = int(img.height * resize_ratio)
+
+    # Resize the image
+    resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
+
+    # Save the resized image
+    resized_img.save(image_path)
+
+def detect_head_centers(image_path):
+    # Initialize Roboflow
+    rf = Roboflow(api_key="K9A8vdmXXNpdi3lmHVBI")
+    project = rf.workspace().project("people_counterv0")
+    model = project.version(1).model
+
+    resize_image(image_path)
+
+    # Run the model prediction
+    prediction = model.predict(image_path, confidence=40, overlap=30).json()
+
+    # Get the image width and height from the prediction dictionary
+    image_width = int(prediction['image']['width'])
+    image_height = int(prediction['image']['height'])
+
+    # Initialize an empty list to hold the center coordinates
+    centers = []
+
+    # Iterate over each detection in the predictions
+    for obj in prediction['predictions']:
+        # Calculate the center of the bounding box
+        x_center = (obj['x'] + obj['width']) / 2
+        y_center = (obj['y'] + obj['height']) / 2
+
+        # Append the center coordinates to the list
+        centers.append((x_center, y_center))
+
+    person_boxes = len(centers)
+
+    # Convert the list to a NumPy array for easier manipulation
+    centers = np.array(centers)
+
+    return centers, image_width, image_height, person_boxes
+
 def calculate_median_proximity(head_centers, image_width, image_height, head_count):
     # Check if no head centers were detected
     if len(head_centers) == 0:
@@ -113,7 +184,7 @@ def calculate_median_proximity(head_centers, image_width, image_height, head_cou
 # Calculate the proximity score using the new function
 
 # Calculate the proximity score using the updated functions
-head_positions, image_width, image_height, numppl= detect_head_centers("./data/slightangle.jpeg")
+head_positions, image_width, image_height, numppl= detect_head_centers("./data/image.jpg")
 
 median_proximity = calculate_median_proximity(head_positions, image_width, image_height, numppl)
 
