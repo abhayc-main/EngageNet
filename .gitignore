@@ -160,6 +160,7 @@ cython_debug/
 #.idea/
 /engagenet/data
 /engagenet/chat.txt
+/engagenet/my_model.h5
 /engagenet/frame.jpg
 /engagenet/head_detection/data
 /engagenet/angle_data

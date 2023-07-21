@@ -31,3 +31,19 @@ Combine the scores for these
     Normalize the proximity scores between 0 and 1, where 0 represents minimal proximity and 1 represents maximum proximity engage
 - Headcount Branch - 5% of total score
 
+
+###### Angle Classes
+| Angle | Direction |
+|-------|-----------|
+| 0     | Down      |
+| 45    | Down-Right|
+| 90    | Right     |
+| 135   | Up-Right  |
+| 180   | Up        |
+| 225   | Up-Left   |
+| 270   | Left      |
+| 315   | Down-Left |
+
+
+###### Issues
+OverClustering (Solved for now - permenant fix will be estbalished in v3):
