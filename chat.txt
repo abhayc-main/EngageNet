@@ -1,3 +1,0 @@
-But heres my question - does the cluster engagement function see if groups of people close together and then see if they are facing together, adn then increase the score based on how many engaged clusters there are? - If this is the case then how do you account groups of people being in circles - the people across from one another might be apart but people close to each other will be classfied as close.  - update the function to fix this 
-
-USE THIS TOMMOROW FOR COMBINATION CLSUTER CODE

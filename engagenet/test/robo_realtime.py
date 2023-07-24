@@ -47,7 +47,13 @@ def resize_image(image_path):
     # Save the resized image
     resized_img.save(image_path)
 
-def detect_head_centers(image_path):
+def detect_head_centers(frame):
+    
+    # Convert the frame to an image and save it
+    img = Image.fromarray(frame)
+    image_path = "current_frame.jpg"
+    img.save(image_path)
+
     # Initialize Roboflow
     rf = Roboflow(api_key="K9A8vdmXXNpdi3lmHVBI")
     project = rf.workspace().project("people_counterv0")
@@ -122,9 +128,9 @@ def preprocess_roi(roi):
 
     return roi
 
-
-def get_head_angles(image_path, centers):
-    # Load the model
+def get_head_angles(frame, centers):
+    # Use the frame directly instead of reading an image
+    image = frame
     # Define the input shape
     input_shape = (180, 180, 3)  # For color images
     # input_shape = (180, 180, 1)  # For grayscale images
@@ -205,6 +211,7 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     
     return proximity_score
 
+
 def calculate_cluster_engagement(head_centers, head_angles):
     # Standardize the head centers for the clustering algorithm
     scaler = StandardScaler()
@@ -268,8 +275,6 @@ def calculate_cluster_engagement(head_centers, head_angles):
     return boosted_cluster_engagement, n_clusters, n_noise
 
 
-
-
 # Function to normalize head count to be between 0 and 1
 def normalize_head_count(head_count):
     normalized_count = min(head_count / 100, 1)
@@ -301,112 +306,47 @@ def calculate_engagement(head_centers, head_angles, image_width, image_height, h
     return engagement_score, n_clusters, n_noise
 
 
-"""
-# Generate Fake Testing data to test algorithm
+# Initialize video capture (0 for webcam, or a filename for a video file)
+cap = cv2.VideoCapture(0)
 
-# Create two clusters of 6 people each facing inwards
-cluster1_centers = np.random.normal(loc=[250, 250], scale=10, size=(6, 2))
-cluster1_angles = np.degrees(np.arctan2(250 - cluster1_centers[:, 1], 250 - cluster1_centers[:, 0])) % 360
-cluster2_centers = np.random.normal(loc=[750, 750], scale=10, size=(6, 2))
-cluster2_angles = np.degrees(np.arctan2(750 - cluster2_centers[:, 1], 750 - cluster2_centers[:, 0])) % 360
+# Initialize the counter
+counter = 0
 
-# Create 3-4 random people scattered here and there
-random_centers = np.random.rand(4, 2) * 1000
-random_angles = np.random.rand(4) * 360
+while(True):
+    # Capture frame-by-frame
+    ret, frame = cap.read()
 
-# Combine the data
-head_centers = np.concatenate([cluster1_centers, cluster2_centers, random_centers], axis=0)
-head_angles = np.concatenate([cluster1_angles, cluster2_angles, random_angles], axis=0)
+    if ret:
+        # Resize and preprocess the frame as needed
+        # frame = preprocess_frame(frame)
 
-# Set the head count
-head_count = len(head_centers)
-"""
+        # Every 5 frames, calculate engagement
+        if counter % 5 == 0:
+            # Detect the head centers and get frame dimensions
+            head_centers, frame_width, frame_height, head_count, boxes = detect_head_centers(frame)
 
-# Calculate engagement
-import os
+            # Predict the head angles
+            head_angles = get_head_angles(frame, head_centers)
 
-# Directory containing the images
-image_dir = "./data/validate/"
-import matplotlib.pyplot as plt
-import cv2
+            # Calculate the engagement
+            engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, frame_width, frame_height, head_count)
 
-from matplotlib import patches
+            print(f"Engagement score: {engagement_score}, Clusters: {n_clusters}, Noise: {n_noise}")
 
-def draw_boxes(image_path, boxes):
-    # Load the image
-    img = Image.open(image_path)
+        # Draw bounding boxes and arrows on the frame
+        # frame = draw_boxes_and_arrows(frame, boxes, angles)
 
-    # Create a figure and axes
-    fig, ax = plt.subplots(1)
+        # Display the resulting frame
+        cv2.imshow('frame', frame)
 
-    # Display the image
-    ax.imshow(img)
+        # If 'q' is pressed on the keyboard, break the loop
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-    # Draw bounding boxes
-    for box in boxes:
-        rect = patches.Rectangle((box[0], box[1]), box[2], box[3], linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
+        counter += 1
 
-    # Remove axes
-    plt.axis('off')
+# After the loop release the cap object
+cap.release()
 
-    return fig, ax
-
-def generate_image_with_info(image_path, engagement_score, n_clusters, n_noise, boxes):
-    # Load the image using OpenCV
-    img = cv2.imread(image_path)
-
-    # Convert the image from BGR to RGB (because OpenCV uses BGR by default, but Matplotlib uses RGB)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-    # Draw each bounding box on the image
-    for box in boxes:
-        # Calculate the top left and bottom right points of the box
-        top_left = (int(box[0] - box[2] / 2), int(box[1] - box[3] / 2))
-        bottom_right = (int(box[0] + box[2] / 2), int(box[1] + box[3] / 2))
-
-        # Draw the box on the image
-        cv2.rectangle(img, top_left, bottom_right, (0, 255, 0), 2)
-
-    # Create the text to display above the image
-    text = f"Engagement score: {engagement_score:.2f}\nClusters: {n_clusters}\nNoise subjects: {n_noise}"
-
-    # Display the image
-    plt.imshow(img)
-    plt.title(text)  # Display the text above the image
-    plt.show()
-
-    return img
-
-
-# Loop over each file in the directory
-for filename in os.listdir(image_dir):
-    start_time = time.time()  # Start the timer
-
-    # Construct the full file path
-    file_path = os.path.join(image_dir, filename)
-
-    # Skip if the file is not an image
-    if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
-        continue
-
-    # Detect the head centers and get image dimensions
-    head_centers, image_width, image_height, head_count, boxes = detect_head_centers(file_path)
-
-    # Predict the head angles
-    head_angles = get_head_angles(file_path, head_centers)
-
-    # Calculate the engagement
-    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, image_width, image_height, head_count)
-
-    # Display the image with information
-    generate_image_with_info(file_path, engagement_score, n_clusters, n_noise, boxes)
-
-    end_time = time.time()  # End the timer
-    print(f"Processing {filename} took {end_time - start_time} seconds.")
-
-
-
-
-
-
+# Destroy all the windows
+cv2.destroyAllWindows()

@@ -7,6 +7,9 @@ from tensorflow.keras.preprocessing import image
 import numpy as np
 import matplotlib as plt
 
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
+from tensorflow.keras.layers import BatchNormalization
+
 
 def test_model(img_path):
 
@@ -61,8 +64,6 @@ validation_generator = datagen.flow_from_directory(
 # Print the class labels
 print(train_generator.class_indices)
 
-from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
-from tensorflow.keras.layers import BatchNormalization
 
 model = Sequential([
     Conv2D(32, (3, 3), activation='relu', input_shape=(img_height, img_width, 3)),
@@ -90,5 +91,4 @@ history = model.fit(
     callbacks=[reduce_lr, early_stopping])
 
 model.save('algorithm.h5') 
-
 
