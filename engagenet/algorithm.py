@@ -94,6 +94,6 @@ history = loaded_model.fit(
     epochs = 50,  # Add the additional epochs
     callbacks=[reduce_lr, early_stopping])
 
-# Save the model after additional training
-loaded_model.save('angle_algorithm_model_end') 
+model.save('algorithm.h5') 
+
 
