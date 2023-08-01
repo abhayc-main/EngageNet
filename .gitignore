@@ -165,3 +165,8 @@ cython_debug/
 /engagenet/head_detection/data
 /engagenet/angle_data
 /engagenet/yolo5s.pt
+
+
+/engagenet/models
+/engagenet/head_images
+/engagenet/temp.jpg

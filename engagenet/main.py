@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 import math
 import time
+import torch
+from ultralytics import YOLO
+import os
 
 # SSL certificate issues fix
 import ssl
@@ -9,9 +12,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 from PIL import Image
 import numpy as np
-from roboflow import Roboflow
 
-
+import tensorflow as tf
 from keras.models import load_model
 from keras.preprocessing.image import img_to_array
 from keras.models import load_model
@@ -23,158 +25,84 @@ from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
 
-def resize_image(image_path):
-    img = Image.open(image_path)
 
-    # Specify the maximum dimensions for resizing
-    max_width = 800
-    max_height = 800
+def detect_head_centers(frame):
+    # Load the YOLO model
+    model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
+    model.conf=0.45
 
-    # Calculate the aspect ratio
-    width_ratio = max_width / img.width
-    height_ratio = max_height / img.height
+    # Save the current frame to a temporary file
+    cv2.imwrite('temp.jpg', frame)
 
-    # Choose the smaller ratio to ensure the image fits within the desired dimensions
-    resize_ratio = min(width_ratio, height_ratio)
+    # Run the model prediction on the frame
+    results = model.predict('temp.jpg')
 
-    # Calculate the new width and height
-    new_width = int(img.width * resize_ratio)
-    new_height = int(img.height * resize_ratio)
-
-    # Resize the image
-    resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
-
-    # Save the resized image
-    resized_img.save(image_path)
-
-def detect_head_centers(image_path):
-    # Initialize Roboflow
-    rf = Roboflow(api_key="K9A8vdmXXNpdi3lmHVBI")
-    project = rf.workspace().project("people_counterv0")
-    model = project.version(1).model
-
-    resize_image(image_path)
-
-    # Run the model prediction
-    prediction = model.predict(image_path, confidence=30, overlap=30).json()
-
-    # Get the image width and height from the prediction dictionary
-    image_width = int(prediction['image']['width'])
-    image_height = int(prediction['image']['height'])
+    image_height, image_width = frame.shape[:2]
 
     # Initialize an empty list to hold the center coordinates
     centers = []
     boxes = []
 
-    # Iterate over each detection in the predictions
-    for obj in prediction['predictions']:
-        # Calculate the center of the bounding box
-        x_center = (obj['x'] + obj['width']) / 2
-        y_center = (obj['y'] + obj['height']) / 2
+    # Iterate over each detection in the results
+    for result in results:
+        # The result.boxes is a tensor with shape [num_detections, 4]
+        # Each detection is a vector [x1, y1, x2, y2]
+        for box in result.boxes:
+            # Convert the box coordinates from xyxy to xywh
+            box = box.xyxy[0].tolist()  # get box coordinates in (top, left, bottom, right) format
+            box = [box[0], box[1], box[2] - box[0], box[3] - box[1]]
 
-        # Append the center coordinates to the list
-        centers.append((x_center, y_center))
+            # Calculate the center of the bounding box
+            x_center = (box[0] + box[2]) / 2
+            y_center = (box[1] + box[3]) / 2
 
-        boxes.append([obj['x'], obj['y'], obj['width'], obj['height']])
+            # Append the center coordinates to the list
+            centers.append((x_center, y_center))
 
+            # Append the box coordinates to the list
+            boxes.append(box)
 
     person_boxes = len(centers)
-    boxes.append([obj['x'], obj['y'], obj['width'], obj['height']])
-
 
     # Convert the list to a NumPy array for easier manipulation
     centers = np.array(centers)
 
-    print(centers, image_width, image_height)
-    return centers, image_width, image_height, person_boxes, boxes
-
-def extract_roi(image, center, size=180):
-    # Padding the image
-    padded_image = cv2.copyMakeBorder(image, top=112, bottom=112, left=112, right=112, borderType=cv2.BORDER_CONSTANT, value=[0,0,0])
-
-    # Adjust the center for the padding
-    center = (center[0] + 112, center[1] + 112)
-
-    # Calculate the top left and bottom right coordinates of the ROI
-    top_left = (max(0, int(center[0] - size / 2)), max(0, int(center[1] - size / 2)))
-    bottom_right = (min(padded_image.shape[1], int(center[0] + size / 2)), min(padded_image.shape[0], int(center[1] + size / 2)))
-
-    print(top_left, bottom_right)
-    
-    # Extract the ROI from the padded image
-    roi = padded_image[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-
-    return roi
+    print(centers)
+    return centers, person_boxes, boxes, image_height, image_width
 
 
-
-def preprocess_roi(roi):
-    # Resize the ROI to the input size expected by the model
-    roi_resized = cv2.resize(roi, (180, 180))
+def preprocess_image(image):
+    # Resize the image to the input size expected by the model
+    image_resized = cv2.resize(image, (180, 180))
 
     # Normalize the pixel values to the range [0, 1]
-    roi_normalized = roi_resized / 255.0
+    image_normalized = image_resized / 255.0
 
-    # Expand the dimensions of the image array if necessary
-    # Some models expect a 4D array as input (batch_size, height, width, channels)
-    # Convert the ROI to a format suitable for the model
-    roi = img_to_array(roi_normalized)
+    # Convert the image to a format suitable for the model
+    image = img_to_array(image_normalized)
 
-    return roi
+    return image
 
-
-def get_head_angles(image_path, centers):
+def get_head_angle(image_path):
     # Load the model
-    # Define the input shape
-    input_shape = (180, 180, 3)  # For color images
-    # input_shape = (180, 180, 1)  # For grayscale images
+    model_path = './models/angle_algorithm_model_end'
+    model = tf.keras.models.load_model(model_path)
 
-    # Load the model with the specified input shape
-    model = load_model('my_model.h5', custom_objects={'input': Input(shape=input_shape)})
-    
-    print("Model input shape:", model.input_shape)
-    
     image = cv2.imread(image_path)
 
-    # Initialize an empty list to hold the angles
-    angles = []
+    # Preprocess the image for the model
+    image = preprocess_image(image)
 
-    # Iterate over each center
-    for center in centers:
-        # Extract the region of interest around the center
-        roi = extract_roi(image, center)
+    # Convert the image to a format suitable for the model
+    image = img_to_array(image)
+    image = np.expand_dims(image, axis=0)
 
-        # Preprocess the region of interest for the model
-        roi = preprocess_roi(roi)
+    angle = model.predict(image)
 
-            # Print the roi and its shape
-        print("ROI shape:", roi.shape)
+    # Squeeze the angle array to remove unnecessary dimensions
+    angle = angle.squeeze()
 
-        # Print the dimensions to resize to
-        print("Resize dimensions:", (model.input_shape[1], model.input_shape[2]))
-
-
-        # Resize the ROI to the input size expected by the model
-        #roi = cv2.resize(roi, (model.input_shape[1], model.input_shape[2]))
-
-        # Convert the ROI to a format suitable for the model
-        roi = img_to_array(roi)
-        roi = np.expand_dims(roi, axis=0)
-
-        angle = model.predict(roi)
-        print(f"angle shape: {angle.shape}")  # Add this line
-
-
-        # Append the angle to the list
-        angles.append(angle)
-
-    # Convert the list to a NumPy array for easier manipulation
-    angles = np.array(angles)
-
-    angles = angles.squeeze()
-
-    return angles
-
+    return angle
 
 # Function to calculate proximity score based on head positions
 def calculate_proximity_score(head_centers, image_width, image_height):
@@ -206,6 +134,10 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     return proximity_score
 
 def calculate_cluster_engagement(head_centers, head_angles):
+
+    if len(head_centers) == 0:
+        return 0, 0, 0
+
     # Standardize the head centers for the clustering algorithm
     scaler = StandardScaler()
     X = scaler.fit_transform(head_centers)
@@ -268,14 +200,13 @@ def calculate_cluster_engagement(head_centers, head_angles):
     return boosted_cluster_engagement, n_clusters, n_noise
 
 
-
-
 # Function to normalize head count to be between 0 and 1
 def normalize_head_count(head_count):
     normalized_count = min(head_count / 100, 1)
     return normalized_count
 
-def calculate_engagement(head_centers, head_angles, image_width, image_height, head_count, proximity_weight=0.4, cluster_weight=0.5, headcount_weight=0.1):
+
+def calculate_engagement(head_centers, head_angles, head_count, image_height, image_width, proximity_weight=0.4, cluster_weight=0.5, headcount_weight=0.1):
     # Calculate the proximity score and the cluster engagement
     proximity_score = calculate_proximity_score(head_centers, image_width, image_height)
     cluster_engagement, n_clusters, n_noise = calculate_cluster_engagement(head_centers, head_angles)
@@ -301,112 +232,81 @@ def calculate_engagement(head_centers, head_angles, image_width, image_height, h
     return engagement_score, n_clusters, n_noise
 
 
-"""
-# Generate Fake Testing data to test algorithm
+import threading
 
-# Create two clusters of 6 people each facing inwards
-cluster1_centers = np.random.normal(loc=[250, 250], scale=10, size=(6, 2))
-cluster1_angles = np.degrees(np.arctan2(250 - cluster1_centers[:, 1], 250 - cluster1_centers[:, 0])) % 360
-cluster2_centers = np.random.normal(loc=[750, 750], scale=10, size=(6, 2))
-cluster2_angles = np.degrees(np.arctan2(750 - cluster2_centers[:, 1], 750 - cluster2_centers[:, 0])) % 360
+# Initialize a lock object
+lock = threading.Lock()
 
-# Create 3-4 random people scattered here and there
-random_centers = np.random.rand(4, 2) * 1000
-random_angles = np.random.rand(4) * 360
+# Initialize global variables for the results
+engagement_score = 0
+n_clusters = 0
+n_noise = 0
+boxes = []
 
-# Combine the data
-head_centers = np.concatenate([cluster1_centers, cluster2_centers, random_centers], axis=0)
-head_angles = np.concatenate([cluster1_angles, cluster2_angles, random_angles], axis=0)
-
-# Set the head count
-head_count = len(head_centers)
-"""
-
-# Calculate engagement
-import os
-
-# Directory containing the images
-image_dir = "./data/validate/"
-import matplotlib.pyplot as plt
-import cv2
-
-from matplotlib import patches
-
-def draw_boxes(image_path, boxes):
-    # Load the image
-    img = Image.open(image_path)
-
-    # Create a figure and axes
-    fig, ax = plt.subplots(1)
-
-    # Display the image
-    ax.imshow(img)
-
-    # Draw bounding boxes
-    for box in boxes:
-        rect = patches.Rectangle((box[0], box[1]), box[2], box[3], linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-
-    # Remove axes
-    plt.axis('off')
-
-    return fig, ax
-
-def generate_image_with_info(image_path, engagement_score, n_clusters, n_noise, boxes):
-    # Load the image using OpenCV
-    img = cv2.imread(image_path)
-
-    # Convert the image from BGR to RGB (because OpenCV uses BGR by default, but Matplotlib uses RGB)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-    # Draw each bounding box on the image
-    for box in boxes:
-        # Calculate the top left and bottom right points of the box
-        top_left = (int(box[0] - box[2] / 2), int(box[1] - box[3] / 2))
-        bottom_right = (int(box[0] + box[2] / 2), int(box[1] + box[3] / 2))
-
-        # Draw the box on the image
-        cv2.rectangle(img, top_left, bottom_right, (0, 255, 0), 2)
-
-    # Create the text to display above the image
-    text = f"Engagement score: {engagement_score:.2f}\nClusters: {n_clusters}\nNoise subjects: {n_noise}"
-
-    # Display the image
-    plt.imshow(img)
-    plt.title(text)  # Display the text above the image
-    plt.show()
-
-    return img
-
-
-# Loop over each file in the directory
-for filename in os.listdir(image_dir):
-    start_time = time.time()  # Start the timer
-
-    # Construct the full file path
-    file_path = os.path.join(image_dir, filename)
-
-    # Skip if the file is not an image
-    if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
-        continue
-
+def detect_and_calculate(frame):
+    global engagement_score, n_clusters, n_noise, boxes
     # Detect the head centers and get image dimensions
-    head_centers, image_width, image_height, head_count, boxes = detect_head_centers(file_path)
+    head_centers, person_boxes, boxes, image_height, image_width = detect_head_centers(frame)
 
-    # Predict the head angles
-    head_angles = get_head_angles(file_path, head_centers)
+    # Initialize an empty list to hold the head angles
+    head_angles = []
+
+    # Iterate over each detected head
+    for i, box in enumerate(boxes):
+
+        box = [min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])]
+
+        if i < len(boxes):
+            # Crop the head from the frame
+            head_img = frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]
+            
+            # Check if the cropped image is not empty
+            if head_img.size > 0 and head_img.shape[0] > 0 and head_img.shape[1] > 0:
+                # Only calculate the angle if the head was also detected when calculating head_centers
+
+                box = boxes[i]                    
+                # Save the cropped head to the head_images directory
+                cv2.imwrite(f'./head_images/head_{i}.jpg', head_img)
+
+                # Predict the head angle
+                head_angle = get_head_angle(f'./head_images/head_{i}.jpg')
+
+                # Append the head angle to the list
+                head_angles.append(head_angle)
+
 
     # Calculate the engagement
-    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, image_width, image_height, head_count)
+    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, person_boxes, image_height, image_width)
 
-    # Display the image with information
-    generate_image_with_info(file_path, engagement_score, n_clusters, n_noise, boxes)
+# In your main loop:
+frame_count = 0
 
-    end_time = time.time()  # End the timer
-    print(f"Processing {filename} took {end_time - start_time} seconds.")
+cap = cv2.VideoCapture(0)
 
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
 
+    # If frame is read correctly, ret is True
+    if not ret:
+        print("Can't receive frame (stream end?). Exiting ...")
+        break
 
+    frame_count += 1
+    if frame_count % 30 == 0:
+        # Start a new thread for detection and calculation
+        threading.Thread(target=detect_and_calculate, args=(frame,)).start()
 
+    # Draw the bounding boxes on the frame
+    for box in boxes:
+        cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
 
+    # Display the engagement score on the frame
+    cv2.putText(frame, f"Engagement: {engagement_score:.2f}, Clusters: {n_clusters}, Noise: {n_noise}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
+    # Display the resulting frame
+    cv2.imshow('Frame', frame)
+
+    # Quit if 'q' is pressed
+    if cv2.waitKey(1) == ord('q'):
+        break

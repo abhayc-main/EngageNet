@@ -4,10 +4,10 @@ import numpy as np
 
 def predict_image_class(img_path):
     # Load the trained model
-    model = tf.keras.models.load_model("my_model.h5")
+    model = tf.keras.models.load_model("angle_algorithm_model_end")
 
     # Load the image for prediction
-    img = image.load_img(img_path, target_size=(180, 180))
+    img = image.load_img(img_path, target_size=(180, 180), color_mode="rgb")
 
     # Convert the image to a numpy array and scale it
     img_array = image.img_to_array(img) / 255.
@@ -29,8 +29,9 @@ def predict_image_class(img_path):
 
     return predicted_class_label
 
+
 # Call the function with the path to your model and test image
-predicted_class = predict_image_class('./data/validate/L.png')
+predicted_class = predict_image_class('./data/validate/3.png')
 
 print(f"The predicted angle for the image is: {predicted_class}")
 

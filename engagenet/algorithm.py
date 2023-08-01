@@ -37,7 +37,7 @@ def test_model(img_path):
 
 
 # Define the path to the data directory
-data_dir = './data/angle_data'
+data_dir = './data/angle_dataV1'
 
 # Define the image size
 img_height = 180 
@@ -82,13 +82,18 @@ model.compile(loss='categorical_crossentropy',
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.001)
 early_stopping = EarlyStopping(monitor='val_loss', patience=30)
 
-history = model.fit(
+# Load the model
+loaded_model = tf.keras.models.load_model('angle_algorithm_model_main')
+
+# Continue training
+history = loaded_model.fit(
     train_generator,
     steps_per_epoch = train_generator.samples // 32,
     validation_data = validation_generator, 
     validation_steps = validation_generator.samples // 32,
-    epochs = 25,
+    epochs = 50,  # Add the additional epochs
     callbacks=[reduce_lr, early_stopping])
 
-model.save('algorithm.h5') 
+# Save the model after additional training
+loaded_model.save('angle_algorithm_model_end') 
 
