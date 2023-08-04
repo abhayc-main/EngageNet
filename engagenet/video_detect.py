@@ -22,7 +22,7 @@ from keras.layers import Input
 
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -137,6 +137,22 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     
     return proximity_score
 
+def select_algorithm(number_of_people, density_variation, cluster_shapes, noise_level):
+    threshold = 0.5  # Define the threshold value
+    desired_clusters = 2  # Define the desired number of clusters
+
+    if number_of_people < 5:
+        return DBSCAN(eps=1.75, min_samples=2)
+    elif density_variation > threshold and cluster_shapes == 'circular':
+        return HDBSCAN(min_cluster_size=2)
+    elif noise_level < threshold:
+        return KMeans(n_clusters=desired_clusters)
+    elif cluster_shapes == 'linear':
+        return AgglomerativeClustering(n_clusters=desired_clusters, linkage='ward')
+    else:
+        return DBSCAN(eps=1.5, min_samples=2)
+
+
 def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     if previous_clusters is None:
         previous_clusters = []
@@ -145,15 +161,30 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     truly_engaged_groups = 0
     threshold=3
 
-    if len(head_centers) == 0:
-        return 0, 0, 0
-
     # Standardize the head centers for the clustering algorithm
     scaler = StandardScaler()
     X = scaler.fit_transform(head_centers)
-    
-    # Apply DBSCAN clustering
+
+    # Calculate density variation as the standard deviation of pairwise distances
+    pairwise_distances_matrix = pairwise_distances(X)
+    density_variation = np.std(pairwise_distances_matrix)
+
+    # Calculate the eigenvalues of the covariance matrix to determine cluster shapes
+    cov_matrix = np.cov(X.T)
+    eigenvalues = np.linalg.eigvals(cov_matrix)
+    cluster_shapes = 'circular' if np.allclose(eigenvalues[0], eigenvalues[1], atol=0.1) else 'linear'
+
+    # Apply DBSCAN clustering to calculate noise level
     clustering = DBSCAN(eps=1.5, min_samples=2).fit(X)
+    labels = clustering.labels_
+    n_noise = list(labels).count(-1)
+    noise_level = n_noise / len(head_centers) if len(head_centers) > 0 else 0
+
+    # Select the clustering algorithm
+    clustering_algorithm = select_algorithm(len(head_centers), density_variation, cluster_shapes, noise_level)
+
+    # Apply the selected clustering algorithm
+    clustering = clustering_algorithm.fit(X)
     labels = clustering.labels_
     
     # Calculate the number of clusters and noise points
@@ -238,7 +269,7 @@ def exponential_smoothing(scores, alpha=0.1):
         smoothed_scores.append(alpha * score + (1 - alpha) * smoothed_scores[-1])
     return smoothed_scores
 
-def calculate_engagement(head_centers, head_angles, head_count, image_height, image_width, proximity_weight=0.4, cluster_weight=0.5, headcount_weight=0.1, previous_clusters=None):
+def calculate_engagement(head_centers, head_angles, head_count, image_height, image_width, previous_clusters, previous_engagement_score=0, no_cluster_frames=0, initial_frames=0):
 
     # Calculate the proximity score and the cluster engagement
     proximity_score = calculate_proximity_score(head_centers, image_width, image_height)
@@ -252,36 +283,43 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     
     # Subtract the noise penalty from the cluster engagement score
     cluster_engagement = cluster_engagement * (1 - noise_penalty) 
-    
-    # If no clusters detected, adjust the weights
-    if n_clusters == 0:
-        proximity_weight = 0.7
-        cluster_weight = 0.2
-        headcount_weight = 0.1
 
-    if head_count == 0 and 1:
-        proximity_weight = 0
-        cluster_weight = 0
-        headcount_weight = 0
-    
-    if proximity_weight is None:
-        proximity_weight = 0.4
-    # Calculate the overall engagement score
-    engagement_score = proximity_weight * proximity_score + cluster_weight * cluster_engagement + headcount_weight * normalized_count
+    INITIAL_THRESHOLD = 10  # Number of initial frames to use weighted average
+    THRESHOLD = 30  # Number of frames to carry over previous score
+    DECAY_FACTOR = 0.95  # Decay factor to gradually reduce the engagement score
+
+    if n_clusters == 0:
+        if initial_frames < INITIAL_THRESHOLD:
+            engagement_score = 0.7 * proximity_score + 0.3 * normalized_count
+            initial_frames += 1
+        elif no_cluster_frames < THRESHOLD:
+            engagement_score = 0.7 * previous_engagement_score
+        else:
+            engagement_score = previous_engagement_score * DECAY_FACTOR
+        no_cluster_frames += 1
+    else:
+        no_cluster_frames = 0
+        initial_frames = 0
+        engagement_score = 0.4 * proximity_score + 0.5 * cluster_engagement + 0.1 * normalized_count
+
     
     return engagement_score, n_clusters, n_noise
 
 model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
-model.conf=0.
+model.conf=0.20
 
 # Rectangle color
 rect_color = (235, 64, 52)
 
-video_path = "./videos/istockphoto-1251036877-640_adpp_is.mp4"
+video_path = "./videos/istockphoto-1164379051-640_adpp_is.mp4"
 
 engagement_scores=[]
 
 previous_clusters = None
+
+previous_engagement_score = 0
+no_cluster_frames = 0
+initial_frames = 0
 
 # Loop through the tracking results
 for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True):
@@ -298,7 +336,11 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in boxes]
 
     # Calculate engagement score
-    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters)
+    engagement_score, n_clusters, n_noise = calculate_engagement(
+        head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
+    )
+
+    previous_engagement_score = engagement_score
 
     # Append the engagement score to the list
     engagement_scores.append(engagement_score)
