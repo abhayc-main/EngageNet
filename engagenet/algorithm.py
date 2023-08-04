@@ -95,5 +95,3 @@ history = loaded_model.fit(
     callbacks=[reduce_lr, early_stopping])
 
 model.save('algorithm.h5') 
-
-

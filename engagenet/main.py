@@ -1,4 +1,5 @@
 import cv2
+import threading
 import numpy as np
 import math
 import time
@@ -13,7 +14,7 @@ ssl._create_default_https_context = ssl._create_unverified_context
 from PIL import Image
 import numpy as np
 
-
+import tensorflow as tf
 from keras.models import load_model
 from keras.preprocessing.image import img_to_array
 from keras.models import load_model
@@ -24,43 +25,69 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def detect_head_centers(frame):
-    # Load the YOLO model
-    model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
-    model.conf=0.45
+model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
+model.conf=0.40
 
-    # Save the current frame to a temporary file
-    cv2.imwrite('temp.jpg', frame)
+# Export the model to ONNX format
+model.export(format='onnx')
+print("Successfully exported the model into .onnx format")
 
-    # Run the model prediction on the frame
-    results = model.predict('temp.jpg')
+import onnxruntime as ort
+
+def load_onnx_model(onnx_path):
+    session = ort.InferenceSession(onnx_path)
+    print("Loaded ONNX model")
+    return session
+
+onnx_path = './best.onnx'
+ort_session = load_onnx_model(onnx_path)
+
+# Load the head angle model
+angle_model = tf.keras.models.load_model('./models/angle_algorithm_model_end')
+
+# Initialize a lock object
+lock = threading.Lock()
+
+# Initialize global variables for the results
+engagement_score = 0
+n_clusters = 0
+n_noise = 0
+boxes = []
+
+def detect_head_centers(frame, ort_session):
+    # Run the ONNX model prediction on the frame
+    inputs = {ort_session.get_inputs()[0].name: frame[None]}
+    results = ort_session.run(None, inputs)
+
+    # Extract the detections from the ONNX model results
+    detections = results[0]
 
     image_height, image_width = frame.shape[:2]
 
-    # Initialize an empty list to hold the center coordinates
+    # Initialize empty lists to hold the center coordinates and boxes
     centers = []
     boxes = []
 
-    # Iterate over each detection in the results
-    for result in results:
-        # The result.boxes is a tensor with shape [num_detections, 4]
-        # Each detection is a vector [x1, y1, x2, y2]
-        for box in result.boxes:
-            # Convert the box coordinates from xyxy to xywh
-            box = box.xyxy[0].tolist()  # get box coordinates in (top, left, bottom, right) format
-            box = [box[0], box[1], box[2] - box[0], box[3] - box[1]]
+    # Iterate over the detections and calculate the centers and boxes
+    for detection in detections:
+        # Extract the bounding box coordinates
+        x1, y1, x2, y2 = detection[:4]
 
-            # Calculate the center of the bounding box
-            x_center = (box[0] + box[2]) / 2
-            y_center = (box[1] + box[3]) / 2
+        # Convert the box coordinates to the original image scale
+        box = [x1 * image_width, y1 * image_height, (x2 - x1) * image_width, (y2 - y1) * image_height]
 
-            # Append the center coordinates to the list
-            centers.append((x_center, y_center))
+        # Calculate the center of the bounding box
+        x_center = (box[0] + box[2]) / 2
+        y_center = (box[1] + box[3]) / 2
 
-            # Append the box coordinates to the list
-            boxes.append(box)
+        # Append the center coordinates to the list
+        centers.append((x_center, y_center))
+
+        # Append the box coordinates to the list
+        boxes.append(box)
 
     person_boxes = len(centers)
 
@@ -69,7 +96,6 @@ def detect_head_centers(frame):
 
     print(centers)
     return centers, person_boxes, boxes, image_height, image_width
-
 
 def preprocess_image(image):
     # Resize the image to the input size expected by the model
@@ -85,8 +111,6 @@ def preprocess_image(image):
 
 def get_head_angle(image_path):
     # Load the model
-    model_path = './models/angle_algorithm_model_end'
-    model = tf.keras.models.load_model(model_path)
 
     image = cv2.imread(image_path)
 
@@ -97,7 +121,7 @@ def get_head_angle(image_path):
     image = img_to_array(image)
     image = np.expand_dims(image, axis=0)
 
-    angle = model.predict(image)
+    angle = angle_model.predict(image)
 
     # Squeeze the angle array to remove unnecessary dimensions
     angle = angle.squeeze()
@@ -219,12 +243,18 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     
     # Subtract the noise penalty from the cluster engagement score
     cluster_engagement = cluster_engagement * (1 - noise_penalty)
+
+    if head_count == 0:
+        proximity_weight = 0
+        cluster_weight = 0
+        headcount_weight = 0
     
     # If no clusters detected, adjust the weights
     if n_clusters == 0:
         proximity_weight = 0.7
         cluster_weight = 0.2
         headcount_weight = 0.1
+
     
     # Calculate the overall engagement score
     engagement_score = proximity_weight * proximity_score + cluster_weight * cluster_engagement + headcount_weight * normalized_count
@@ -246,12 +276,11 @@ boxes = []
 def detect_and_calculate(frame):
     global engagement_score, n_clusters, n_noise, boxes
     # Detect the head centers and get image dimensions
-    head_centers, person_boxes, boxes, image_height, image_width = detect_head_centers(frame)
+    head_centers, person_boxes, boxes, image_height, image_width = detect_head_centers(frame, ort_session)
 
     # Initialize an empty list to hold the head angles
     head_angles = []
 
-    # Iterate over each detected head
     for i, box in enumerate(boxes):
 
         box = [min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])]
@@ -278,35 +307,73 @@ def detect_and_calculate(frame):
     # Calculate the engagement
     engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, person_boxes, image_height, image_width)
 
-# In your main loop:
+# Open the video capture
+cap = cv2.VideoCapture(1)
+
 frame_count = 0
 
-cap = cv2.VideoCapture(0)
+def draw_rounded_box(img, box, color, thickness, radius=10, confidence=None):
+    x1, y1, x2, y2 = box
+    cv2.rectangle(img, (x1 + radius, y1), (x2 - radius, y2), color, thickness)
+    cv2.rectangle(img, (x1, y1 + radius), (x2, y2 - radius), color, thickness)
+    cv2.ellipse(img, (x1 + radius, y1 + radius), (radius, radius), 180, 0, 90, color, thickness)
+    cv2.ellipse(img, (x2 - radius, y1 + radius), (radius, radius), 270, 0, 90, color, thickness)
+    cv2.ellipse(img, (x1 + radius, y2 - radius), (radius, radius), 90, 0, 90, color, thickness)
+    cv2.ellipse(img, (x2 - radius, y2 - radius), (radius, radius), 0, 0, 90, color, thickness)
+
+    if confidence is not None:
+        label = f"{confidence * 100:.2f}%"
+        font_scale = 0.5
+        font_thickness = 1
+        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+        text_x = x1 + radius
+        text_y = y1 + text_size[1] + 5
+        cv2.putText(img, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, [255, 255, 255], font_thickness)
+
 
 while True:
-    # Capture frame-by-frame
+    # Read the frame from the video capture
     ret, frame = cap.read()
 
-    # If frame is read correctly, ret is True
+    # If the frame was not read correctly, break the loop
     if not ret:
-        print("Can't receive frame (stream end?). Exiting ...")
         break
 
+    # Increment the frame count
     frame_count += 1
+
+    # Perform detection and calculation every 30 frames
     if frame_count % 30 == 0:
         # Start a new thread for detection and calculation
-        threading.Thread(target=detect_and_calculate, args=(frame,)).start()
+        threading.Thread(target=detect_and_calculate, args=(frame, ort_session)).start()
 
-    # Draw the bounding boxes on the frame
-    for box in boxes:
-        cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
+        # Create a blank image to display the scores
+        score_image = np.zeros((500, 500, 3), dtype="uint8")
 
-    # Display the engagement score on the frame
-    cv2.putText(frame, f"Engagement: {engagement_score:.2f}, Clusters: {n_clusters}, Noise: {n_noise}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+        # Draw the scores on the image
+        cv2.putText(score_image, f"Engagement Score: {engagement_score}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(score_image, f"Number of Clusters: {n_clusters}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(score_image, f"Noise: {n_noise}", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-    # Display the resulting frame
-    cv2.imshow('Frame', frame)
+        # Display the scores in a separate window
+        cv2.imshow('Scores', score_image)
 
-    # Quit if 'q' is pressed
-    if cv2.waitKey(1) == ord('q'):
+    # Perform YOLO detection on the frame
+    results = model.predict(frame)
+    #Draw the bounding boxes on the frame
+    for result in results:
+        for box in result.boxes:
+           coordinates = box.xyxy[0].tolist()  # get box coordinates in (top, left, bottom, right) format
+           confidence = box.conf[0].item()  # get confidence value
+           cv2.rectangle(frame, (int(coordinates[0]), int(coordinates[1])), (int(coordinates[2]), int(coordinates[3])), (199, 58, 58), 2)
+           cv2.putText(frame, f"{confidence:.2f}", (int(coordinates[0]), int(coordinates[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (199, 58, 58), 2)    # Display the frame with bounding boxes
+    cv2.imshow('YOLO Detections', frame)
+
+    # Break the loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+
+# Release the video capture and close the windows
+cap.release()
+cv2.destroyAllWindows()

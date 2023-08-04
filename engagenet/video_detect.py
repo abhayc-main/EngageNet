@@ -137,7 +137,13 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     
     return proximity_score
 
-def calculate_cluster_engagement(head_centers, head_angles):
+def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
+    if previous_clusters is None:
+        previous_clusters = []
+
+    # Variables for temporal threshold clustering
+    truly_engaged_groups = 0
+    threshold=3
 
     if len(head_centers) == 0:
         return 0, 0, 0
@@ -193,6 +199,20 @@ def calculate_cluster_engagement(head_centers, head_angles):
         
         total_size += len(indices)
 
+        # Check if the group is engaged based on existing conditions
+        if engaged_centroid or engaged_pairs:
+            engaged_groups += 1
+
+            # Check if the cluster has been engaged for the last 'threshold' frames
+            if len(previous_clusters) >= threshold and all(prev_cluster[cluster_id] for prev_cluster in previous_clusters[-threshold:]):
+                truly_engaged_groups += 1
+
+    # Store the current clusters as previous clusters for the next frame
+    previous_clusters.append([engaged_centroid or engaged_pairs for cluster_id in range(n_clusters)])
+
+    # Calculate the engagement score based on truly engaged groups
+    cluster_engagement = truly_engaged_groups / n_clusters if n_clusters > 0 else 0
+
     # Calculate the engagement score
     cluster_engagement = engaged_groups / n_clusters if n_clusters > 0 else 0
     
@@ -202,21 +222,27 @@ def calculate_cluster_engagement(head_centers, head_angles):
     boosted_cluster_engagement = cluster_engagement * (1 + size_boost)
     
     if boosted_cluster_engagement > 1:
-        boosted_cluster_engagement = 1.0
+        boosted_cluster_engagement = 1.1
 
     return boosted_cluster_engagement, n_clusters, n_noise
-
 
 # Function to normalize head count to be between 0 and 1
 def normalize_head_count(head_count):
     normalized_count = min(head_count / 100, 1)
     return normalized_count
 
+# To prevent severe score drops - exponenital smoothing algorithm implementation
+def exponential_smoothing(scores, alpha=0.1):
+    smoothed_scores = [scores[0]]
+    for score in scores[1:]:
+        smoothed_scores.append(alpha * score + (1 - alpha) * smoothed_scores[-1])
+    return smoothed_scores
 
-def calculate_engagement(head_centers, head_angles, head_count, image_height, image_width, proximity_weight=0.4, cluster_weight=0.5, headcount_weight=0.1):
+def calculate_engagement(head_centers, head_angles, head_count, image_height, image_width, proximity_weight=0.4, cluster_weight=0.5, headcount_weight=0.1, previous_clusters=None):
+
     # Calculate the proximity score and the cluster engagement
     proximity_score = calculate_proximity_score(head_centers, image_width, image_height)
-    cluster_engagement, n_clusters, n_noise = calculate_cluster_engagement(head_centers, head_angles)
+    cluster_engagement, n_clusters, n_noise = calculate_cluster_engagement(head_centers, head_angles, previous_clusters)
     
     # Normalize the head count
     normalized_count = normalize_head_count(head_count)
@@ -225,34 +251,38 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     noise_penalty = n_noise / len(head_centers) if len(head_centers) > 0 else 0
     
     # Subtract the noise penalty from the cluster engagement score
-    cluster_engagement = cluster_engagement * (1 - noise_penalty)
+    cluster_engagement = cluster_engagement * (1 - noise_penalty) 
+    
+    # If no clusters detected, adjust the weights
+    if n_clusters == 0:
+        proximity_weight = 0.7
+        cluster_weight = 0.2
+        headcount_weight = 0.1
 
     if head_count == 0 and 1:
         proximity_weight = 0
         cluster_weight = 0
         headcount_weight = 0
     
-    '''
-    # If no clusters detected, adjust the weights
-    if n_clusters == 0:
-        proximity_weight = 0.7
-        cluster_weight = 0.2
-        headcount_weight = 0.1
-    '''
-
-    
+    if proximity_weight is None:
+        proximity_weight = 0.4
     # Calculate the overall engagement score
     engagement_score = proximity_weight * proximity_score + cluster_weight * cluster_engagement + headcount_weight * normalized_count
     
     return engagement_score, n_clusters, n_noise
 
 model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
-model.conf=0.05
+model.conf=0.
 
 # Rectangle color
 rect_color = (235, 64, 52)
 
-video_path = "./videos/istockphoto-1302260068-640_adpp_is.mp4"
+video_path = "./videos/istockphoto-1251036877-640_adpp_is.mp4"
+
+engagement_scores=[]
+
+previous_clusters = None
+
 # Loop through the tracking results
 for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True):
     frame = result.orig_img
@@ -268,10 +298,19 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in boxes]
 
     # Calculate engagement score
-    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1])
+    engagement_score, n_clusters, n_noise = calculate_engagement(head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters)
 
-    # Print the engagement score
-    print(f"Engagement Score: {engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
+    # Append the engagement score to the list
+    engagement_scores.append(engagement_score)
+
+    # Apply exponential smoothing to the engagement scores
+    smoothed_scores = exponential_smoothing(engagement_scores)
+
+    # Use the smoothed score for the current frame
+    smoothed_engagement_score = smoothed_scores[-1]
+
+    # Print the smoothed engagement score
+    print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
 
     # Annotate the boxes on the frame
     for box in boxes:

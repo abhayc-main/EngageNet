@@ -169,4 +169,4 @@ cython_debug/
 
 /engagenet/models
 /engagenet/head_images
-/engagenet/temp.jpg
+/engagenet/videos
