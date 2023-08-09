@@ -37,7 +37,7 @@ def test_model(img_path):
 
 
 # Define the path to the data directory
-data_dir = './data/angle_dataV1'
+data_dir = './data/Overhead Angle Data'
 
 # Define the image size
 img_height = 180 
@@ -66,12 +66,41 @@ print(train_generator.class_indices)
 
 
 model = Sequential([
-    Conv2D(32, (3, 3), activation='relu', input_shape=(img_height, img_width, 3)),
+    # First Conv block
+    Conv2D(32, (3, 3), activation='relu', padding='same', input_shape=(img_height, img_width, 3)),
+    BatchNormalization(),
+    Conv2D(32, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
     MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
+    
+    # Second Conv block
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
+
+    # Third Conv block
+    Conv2D(128, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    Conv2D(128, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
+    MaxPooling2D(pool_size=(2, 2)),
+    Dropout(0.25),
     
     Flatten(),
-    Dense(128, activation='relu'),
+    
+    # Dense layers
+    Dense(512, activation='relu'),
+    BatchNormalization(),
     Dropout(0.5),
+    
+    Dense(128, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.5),
+    
     Dense(8, activation='softmax')  # 8 classes for 8 angles
 ])
 
@@ -82,11 +111,10 @@ model.compile(loss='categorical_crossentropy',
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.001)
 early_stopping = EarlyStopping(monitor='val_loss', patience=30)
 
-# Load the model
-loaded_model = tf.keras.models.load_model('angle_algorithm_model_main')
+
 
 # Continue training
-history = loaded_model.fit(
+history = model.fit(
     train_generator,
     steps_per_epoch = train_generator.samples // 32,
     validation_data = validation_generator, 
@@ -94,4 +122,4 @@ history = loaded_model.fit(
     epochs = 50,  # Add the additional epochs
     callbacks=[reduce_lr, early_stopping])
 
-model.save('algorithm.h5') 
+model.save('angle_algorithm_final') 

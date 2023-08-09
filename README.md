@@ -45,5 +45,15 @@ Combine the scores for these
 | 315   | Down-Left |
 
 
+###### Angle Data
+0: 2870 files
+135: 2986 files
+180: 2832 files
+225: 2932 files
+270: 2800 files
+315: 2978 files
+45: 2996 files
+90: 2806 files
+
+
 ###### Issues
-OverClustering (Solved for now - permenant fix will be estbalished in v3):

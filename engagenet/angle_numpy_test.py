@@ -12,7 +12,6 @@ import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 
 from PIL import Image
-import numpy as np
 
 import tensorflow as tf
 from keras.models import load_model
@@ -20,25 +19,12 @@ from keras.preprocessing.image import img_to_array
 from keras.models import load_model
 from keras.layers import Input
 
-import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-import onnxruntime as ort
-
-def load_onnx_model(onnx_path):
-    session = ort.InferenceSession(onnx_path)
-    print("Loaded ONNX model")
-    return session
-
-onnx_path = './models/best.onnx'
-ort_session = load_onnx_model(onnx_path)
-
-# Load the head angle model
-angle_model = tf.keras.models.load_model('./models/angle_algorithm_final')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 
 def preprocess_image(image):
@@ -102,7 +88,7 @@ def select_algorithm(number_of_people, density_variation, cluster_shapes, noise_
     desired_clusters = 2  # Define the desired number of clusters
 
     if number_of_people < 5:
-        return DBSCAN(eps=1.75, min_samples=2)
+        return DBSCAN(eps=1.5, min_samples=2)
     elif density_variation > threshold and cluster_shapes == 'circular':
         return HDBSCAN(min_cluster_size=2)
     elif noise_level < threshold:
@@ -110,7 +96,7 @@ def select_algorithm(number_of_people, density_variation, cluster_shapes, noise_
     elif cluster_shapes == 'linear':
         return AgglomerativeClustering(n_clusters=desired_clusters, linkage='ward')
     else:
-        return DBSCAN(eps=1.5, min_samples=2)
+        return DBSCAN(eps=1.5, min_samples=4)
 
 
 def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
@@ -162,26 +148,38 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
         
         indices_list = indices.tolist()
 
-        # Extract the angles and centers for the current cluster
         group_angles = np.array([head_angles[i] for i in indices_list])  # Convert to NumPy array
         group_centers = np.array([head_centers[i] for i in indices_list])
-        
+
         # Calculate the centroid of the current cluster
         centroid = np.mean(group_centers, axis=0)
-        
-        # Calculate the angles from each point to the centroid
+
+        # Now calculate centroid angles
         centroid_angles = np.array([np.degrees(np.arctan2(centroid[1] - center[1], centroid[0] - center[0])) for center in group_centers])
         centroid_angles = (centroid_angles + 360) % 360
         group_angles = (group_angles + 360) % 360
+        
+        # Calculate the centroid of the current cluster
+        centroid = np.mean(group_centers, axis=0)
 
-        centroid_angles = centroid_angles.reshape(-1,1)
+        # Calculate pairwise angles between individuals
+        pairwise_angles_matrix = np.abs(np.subtract.outer(centroid_angles, centroid_angles))
+        pairwise_angles = np.where(pairwise_angles_matrix > 180, 360 - pairwise_angles_matrix, pairwise_angles_matrix)
+
+        # Dynamic Angle Threshold
+        distances_to_centroid = np.linalg.norm(group_centers - centroid, axis=1)
+        max_distance = np.max(distances_to_centroid)
+        angle_thresholds = 45 - 30 * (distances_to_centroid / max_distance)  # Adjusting threshold based on distance
+
         # Check if the group is engaged based on the orientation towards the centroid
         diff_angles = np.abs(centroid_angles - group_angles)
-        engaged_centroid = np.sum((diff_angles < 45) | (diff_angles > 315)) >= len(indices) / 2
+        engaged_centroid = np.sum((diff_angles < angle_thresholds) | (diff_angles > (360 - angle_thresholds))) >= len(indices) / 2
 
-        # Check if the group is engaged based on pairwise orientations
-        pairwise_angles = pairwise_distances(group_angles.reshape(-1, 1), metric='manhattan') % 180
-        engaged_pairs = np.sum((pairwise_angles < 45) | (pairwise_angles > 315)) >= len(indices) * (len(indices) - 1) / 2
+        # Secondary Metrics: Check if individuals are facing each other within a certain distance
+        pairwise_distances_to_each_other = pairwise_distances(group_centers)
+        close_pairs = pairwise_distances_to_each_other < max_distance * 0.5  # Adjust the distance threshold as needed
+        close_pair_angles = pairwise_angles[close_pairs]
+        engaged_pairs = np.sum((close_pair_angles < 45) | (close_pair_angles > 315)) >= len(indices) * (len(indices) - 1) / 2
 
         # Consider the group as engaged if either condition is met
         if engaged_centroid or engaged_pairs:
@@ -211,8 +209,6 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     size_boost = min(avg_cluster_size / 10, 1)  # Normalize the average size to [0, 1] range by assuming maximum size to be 10
     boosted_cluster_engagement = cluster_engagement * (1 + size_boost)
     
-    if boosted_cluster_engagement > 1:
-        boosted_cluster_engagement = 1.1
 
     return boosted_cluster_engagement, n_clusters, n_noise
 
@@ -220,6 +216,7 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
 def normalize_head_count(head_count):
     normalized_count = min(head_count / 100, 1)
     return normalized_count
+
 
 # To prevent severe score drops - exponenital smoothing algorithm implementation
 def exponential_smoothing(scores, alpha=0.1):
@@ -260,80 +257,111 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
         no_cluster_frames = 0
         initial_frames = 0
         engagement_score = 0.4 * proximity_score + 0.5 * cluster_engagement + 0.1 * normalized_count
+    print(cluster_engagement)
 
-    
+    if engagement_score > 1:
+        engagement_score = 1
     return engagement_score, n_clusters, n_noise
 
-model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
-model.conf=0.20
+# Assuming an image dimension for context in proximity calculations (can be adjusted)
+image_width, image_height = 40, 40
 
-# Rectangle color
-rect_color = (235, 64, 52)
-
-video_path = "./videos/istockphoto-1259059865-640_adpp_is.mp4"
-
-engagement_scores=[]
-
-previous_clusters = None
-
-previous_engagement_score = 0
-no_cluster_frames = 0
-initial_frames = 0
-
-# Loop through the tracking results
-for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True):
-    frame = result.orig_img
-    detections = result.boxes.xyxy 
-     # Get the bounding boxes and class labels
-    boxes = result.boxes.data
-    class_indices = boxes[:, 4].tolist()
-
-    # Set default class for all unrecognized classes
-    default_class_index = 1  # change this to the index of your default class
-
-    class_names = [result.names.get(i, result.names[default_class_index]) for i in class_indices]
-    print(class_names)
+def generate_very_tight_natural_circular_crowds(num_clusters, cluster_size, cluster_radius):
+    all_points = []
     
-    # Extract the bounding boxes
-    boxes = [box[:4] for box in detections]
+    # Determine the radius of the circle on which the clusters are located
+    clusters_circle_radius = 12  # This determines how spread out the clusters are
+    
+    for k in range(num_clusters):
+        # Calculate cluster center
+        angle_for_cluster = 2 * np.pi * k / num_clusters
+        cluster_center_x = image_width/2 + clusters_circle_radius * np.cos(angle_for_cluster)
+        cluster_center_y = image_height/2 + clusters_circle_radius * np.sin(angle_for_cluster)
+        
+        for i in range(cluster_size):
+            angle_variation = np.random.uniform(-0.2, 0.2)  # slight variation in angle for more natural appearance
+            r_variation = cluster_radius * np.random.uniform(-0.7, 0.3)  # increased variation in distance for individuals to be very close together
+            angle = 2 * np.pi * i / cluster_size + angle_variation
+            r = cluster_radius + r_variation
+            x = cluster_center_x + r * np.cos(angle)
+            y = cluster_center_y + r * np.sin(angle)
+            all_points.append((x, y))
+    return all_points
 
-    # Detect head centers
-    head_centers = [(int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)) for box in boxes]
-
-    # Get the track IDs for each detection
-    ids = result.boxes.id.tolist()  # Convert tensor to list
-
-    # Calculate head angles
-    head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
-
-    # Map each ID to its corresponding angle
-    id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
-
-    for id_, angle in id_to_angle.items():
-        most_probable_angle_index = np.argmax(angle)
-        print(f"ID: {id_}, Most Probable Angle Index: {most_probable_angle_index}, Angle Value: {angle[most_probable_angle_index]}")
-    # Calculate engagement score
-    engagement_score, n_clusters, n_noise = calculate_engagement(
-        head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
-    )
-
-    previous_engagement_score = engagement_score
-
-    # Append the engagement score to the list
-    engagement_scores.append(engagement_score)
-
-    # Apply exponential smoothing to the engagement scores
-    smoothed_scores = exponential_smoothing(engagement_scores)
-
-    # Use the smoothed score for the current frame
-    smoothed_engagement_score = smoothed_scores[-1]
-
-    # Print the smoothed engagement score
-    print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
+def generate_angles_towards_centroid(points, num_clusters, cluster_size, towards=True):
+    angles = []
+    for k in range(num_clusters):
+        cluster_points = points[k*cluster_size:(k+1)*cluster_size]
+        centroid = np.mean(cluster_points, axis=0)
+        
+        for point in cluster_points:
+            if towards:
+                angle = np.degrees(np.arctan2(centroid[1] - point[1], centroid[0] - point[0]))
+            else:
+                angle = np.degrees(np.arctan2(point[1] - centroid[1], point[0] - centroid[0]))
+            angles.append(angle)
+    return angles
 
 
-    # Break the loop if the 'ESC' key is pressed
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
+# Parameters for data generation
+num_clusters = 5
+cluster_size = 10
+cluster_radius = 1.5
 
-cv2.destroyAllWindows()
+# Generate the points for very tight natural circular crowds
+all_points_very_tight_natural_crowd_circular = generate_very_tight_natural_circular_crowds(num_clusters, cluster_size, cluster_radius)
+
+# Generate head angles for engaged scenario (facing towards the centroid of their clusters)
+head_angles_circular_engaged_towards_centroid = generate_angles_towards_centroid(all_points_very_tight_natural_crowd_circular, num_clusters, cluster_size, towards=True)
+
+head_count = len(all_points_very_tight_natural_crowd_circular)
+
+# Engagement Calculation for engaged scenario
+engagement_score_engaged, n_clusters_engaged, n_noise_engaged = calculate_engagement(
+    all_points_very_tight_natural_crowd_circular, 
+    head_angles_circular_engaged_towards_centroid, 
+    head_count,
+    image_height=image_height, 
+    image_width=image_width,
+    previous_clusters=None
+)
+
+# Generate head angles for unengaged scenario (facing away from the centroid of their clusters)
+head_angles_circular_unengaged_away_from_centroid = generate_angles_towards_centroid(all_points_very_tight_natural_crowd_circular, num_clusters, cluster_size, towards=False)
+
+# Engagement Calculation for unengaged scenario
+engagement_score_unengaged, n_clusters_unengaged, n_noise_unengaged = calculate_engagement(
+    all_points_very_tight_natural_crowd_circular, 
+    head_angles_circular_unengaged_away_from_centroid, 
+    head_count,
+    image_height=image_height, 
+    image_width=image_width,
+    previous_clusters=None
+)
+
+# Print results
+print(f"Engagement Score (Engaged Scenario - Facing Towards Centroid): {engagement_score_engaged}")
+print(f"Engagement Score (Unengaged Scenario - Facing Away from Centroid): {engagement_score_unengaged}")
+
+# Adjust arrow plotting for better visualization
+def plot_points_with_angles(points, angles, title):
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.set_aspect('equal')
+    ax.set_xlim(0, image_width)
+    ax.set_ylim(0, image_height)
+    
+    for point, angle in zip(points, angles):
+        x, y = point
+        dx = 0.8 * np.cos(np.radians(angle))
+        dy = 0.8 * np.sin(np.radians(angle))
+        ax.arrow(x, y, dx, dy, head_width=0.5, head_length=1, fc='red', ec='red')
+        ax.plot(x, y, 'bo')
+    
+    ax.set_title(title)
+    plt.show()
+
+# Plot points for engaged scenario
+plot_points_with_angles(all_points_very_tight_natural_crowd_circular, head_angles_circular_engaged_towards_centroid, "Engaged Scenario - Facing Towards Centroid")
+
+# Plot points for unengaged scenario
+plot_points_with_angles(all_points_very_tight_natural_crowd_circular, head_angles_circular_unengaged_away_from_centroid, "Unengaged Scenario - Facing Away from Centroid")
