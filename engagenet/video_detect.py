@@ -7,6 +7,12 @@ import torch
 from ultralytics import YOLO
 import os
 
+import aiohttp
+import asyncio
+import base64
+import json
+import cv2
+
 # SSL certificate issues fix
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -37,9 +43,6 @@ def load_onnx_model(onnx_path):
 onnx_path = './models/best.onnx'
 ort_session = load_onnx_model(onnx_path)
 
-# Load the head angle model
-angle_model = tf.keras.models.load_model('./models/angle_algorithm_final')
-
 
 def preprocess_image(image):
     # Resize the image to the input size expected by the model
@@ -53,19 +56,42 @@ def preprocess_image(image):
 
     return image
 
-def get_head_angle(image_region):
-    # Preprocess the image for the model
-    image = preprocess_image(image_region)
+import aiohttp
+import asyncio
+import base64
+import json
+import cv2
 
-    # Convert the image to a format suitable for the model
-    image = img_to_array(image)
-    image = np.expand_dims(image, axis=0)
+# Asynchronous function to send image data and get the angle
+async def send_image(image_data):
+    # URL of your Docker server
+    url = "http://localhost:9001/overhead-angle-detection-6lmpn/3?api_key=R5i9d6qtGJCDn0LiaEhe"
+    
+    # Encode the image data in base64
+    encoded_image = base64.b64encode(image_data)
 
-    angle = angle_model.predict(image)
+    # Headers
+    headers = {
+        "Content-Type": "application/json"
+    }
 
-    # Squeeze the angle array to remove unnecessary dimensions
-    angle = angle.squeeze()
+    # Send the request using aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, data=encoded_image, headers=headers) as response:
+            response_data = await response.text()
+            response_json = json.loads(response_data)
+            # Return the angle with the highest confidence
+            return response_json['top']
 
+# Function to get head angle
+def get_head_angle(head_crop):
+    # Convert the cropped head image to bytes
+    _, buffer = cv2.imencode('.png', head_crop)
+    image_data = buffer.tobytes()
+
+    # Use asyncio loop to run the asynchronous function
+    angle = asyncio.run(send_image(image_data))
+    print(f"Angle returned: {angle}")
     return angle
 
 # Function to calculate proximity score based on head positions
@@ -97,23 +123,22 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     
     return proximity_score
 
-def select_algorithm(number_of_people, density_variation, cluster_shapes, noise_level):
+def select_algorithm(number_of_people, density_variation):
     threshold = 0.5  # Define the threshold value
-    desired_clusters = 2  # Define the desired number of clusters
-
     if number_of_people < 5:
+        print("1st one")
         return DBSCAN(eps=1.75, min_samples=2)
-    elif density_variation > threshold and cluster_shapes == 'circular':
-        return HDBSCAN(min_cluster_size=2)
-    elif noise_level < threshold:
-        return KMeans(n_clusters=desired_clusters)
-    elif cluster_shapes == 'linear':
-        return AgglomerativeClustering(n_clusters=desired_clusters, linkage='ward')
+    elif density_variation > threshold:
+        print("2nd")
+        return DBSCAN(eps = 0.25,min_samples=2)
     else:
-        return DBSCAN(eps=1.5, min_samples=2)
+        return DBSCAN(eps=0.5, min_samples=4)
 
 
 def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
+    if not head_centers:  # Check if head_centers is empty
+        return 0, 0, 0
+    
     if previous_clusters is None:
         previous_clusters = []
 
@@ -129,76 +154,97 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     pairwise_distances_matrix = pairwise_distances(X)
     density_variation = np.std(pairwise_distances_matrix)
 
-    # Calculate the eigenvalues of the covariance matrix to determine cluster shapes
-    cov_matrix = np.cov(X.T)
-    eigenvalues = np.linalg.eigvals(cov_matrix)
-    cluster_shapes = 'circular' if np.allclose(eigenvalues[0], eigenvalues[1], atol=0.1) else 'linear'
 
     # Apply DBSCAN clustering to calculate noise level
-    clustering = DBSCAN(eps=1.5, min_samples=2).fit(X)
-    labels = clustering.labels_
-    n_noise = list(labels).count(-1)
-    noise_level = n_noise / len(head_centers) if len(head_centers) > 0 else 0
-
-    # Select the clustering algorithm
-    clustering_algorithm = select_algorithm(len(head_centers), density_variation, cluster_shapes, noise_level)
+    # Determine the clustering algorithm based on the select_algorithm function
+    clustering_algorithm = select_algorithm(len(head_centers), density_variation)
 
     # Apply the selected clustering algorithm
     clustering = clustering_algorithm.fit(X)
     labels = clustering.labels_
-    
-    # Calculate the number of clusters and noise points
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+
+    # Calculate the number of noise points
     n_noise = list(labels).count(-1)
+    print(n_noise)
+
+    # Calculate the noise level
+    noise_level = n_noise / len(head_centers) if len(head_centers) > 0 else 0
+    print(noise_level)
+
+    # Select the clustering algorithm
+    
+    print(f"Labels {labels}")
+    # Create a set of all data point indices
+    all_indices = set(range(len(head_centers)))
+    
+
+    # Calculate the number of clusters excluding noise
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     
     engaged_groups = 0
     total_size = 0
-    
+    print(f"Noise: {n_noise}")
+
     # Iterate over each cluster
     for cluster_id in range(n_clusters):
         indices = np.where(labels == cluster_id)[0]
+        
+        # Remove the indices of data points that belong to a cluster from the all_indices set
+        all_indices -= set(indices.tolist())
+        
         if len(indices) < 2:
             continue
-        
-        indices_list = indices.tolist()
 
-        # Extract the angles and centers for the current cluster
-        group_angles = np.array([head_angles[i] for i in indices_list])  # Convert to NumPy array
-        group_centers = np.array([head_centers[i] for i in indices_list])
+        # Remove the indices of data points that belong to a cluster from the all_indices set
+        all_indices -= set(indices.tolist())
+        
+        group_angles = np.array([head_angles[i] for i in indices])  # Convert to NumPy array
+        group_centers = np.array([head_centers[i] for i in indices])
+
+        # Calculate the centroid of the current cluster
+        centroid = np.mean(group_centers, axis=0)
+
+        # Now calculate centroid angles
+        centroid_angles = np.array([np.degrees(np.arctan2(centroid[1] - center[1], centroid[0] - center[0])) for center in group_centers])
+        centroid_angles = (centroid_angles + 360) % 360
+
+        group_angles = np.array(group_angles, dtype=float)
+
+        group_angles = (group_angles + 360) % 360
         
         # Calculate the centroid of the current cluster
         centroid = np.mean(group_centers, axis=0)
-        
-        # Calculate the angles from each point to the centroid
-        centroid_angles = np.array([np.degrees(np.arctan2(centroid[1] - center[1], centroid[0] - center[0])) for center in group_centers])
-        centroid_angles = (centroid_angles + 360) % 360
-        group_angles = (group_angles + 360) % 360
 
-        centroid_angles = centroid_angles.reshape(-1,1)
+        # Calculate pairwise angles between individuals
+        pairwise_angles_matrix = np.abs(np.subtract.outer(centroid_angles, centroid_angles))
+        pairwise_angles = np.where(pairwise_angles_matrix > 180, 360 - pairwise_angles_matrix, pairwise_angles_matrix)
+
+        # Dynamic Angle Threshold
+        distances_to_centroid = np.linalg.norm(group_centers - centroid, axis=1)
+        max_distance = np.max(distances_to_centroid)
+        angle_thresholds = 45 - 30 * (distances_to_centroid / max_distance)  # Adjusting threshold based on distance
+
         # Check if the group is engaged based on the orientation towards the centroid
         diff_angles = np.abs(centroid_angles - group_angles)
-        engaged_centroid = np.sum((diff_angles < 45) | (diff_angles > 315)) >= len(indices) / 2
+        engaged_centroid = np.sum((diff_angles < angle_thresholds) | (diff_angles > (360 - angle_thresholds))) >= len(indices) / 2
 
-        # Check if the group is engaged based on pairwise orientations
-        pairwise_angles = pairwise_distances(group_angles.reshape(-1, 1), metric='manhattan') % 180
-        engaged_pairs = np.sum((pairwise_angles < 45) | (pairwise_angles > 315)) >= len(indices) * (len(indices) - 1) / 2
+        # Secondary Metrics: Check if individuals are facing each other within a certain distance
+        pairwise_distances_to_each_other = pairwise_distances(group_centers)
+        close_pairs = pairwise_distances_to_each_other < max_distance * 0.5  # Adjust the distance threshold as needed
+        close_pair_angles = pairwise_angles[close_pairs]
+        engaged_pairs = np.sum((close_pair_angles < 45) | (close_pair_angles > 315)) >= len(indices) * (len(indices) - 1) / 2
 
         # Consider the group as engaged if either condition is met
         if engaged_centroid or engaged_pairs:
             engaged_groups += 1
         
         total_size += len(indices)
+        print(f"Noise in loop: {n_noise}")
 
-        # Check if the group is engaged based on existing conditions
-        if engaged_centroid or engaged_pairs:
-            engaged_groups += 1
 
-            # Check if the cluster has been engaged for the last 'threshold' frames
-            if len(previous_clusters) >= threshold and all(prev_cluster[cluster_id] for prev_cluster in previous_clusters[-threshold:]):
-                truly_engaged_groups += 1
-
-    # Store the current clusters as previous clusters for the next frame
-    previous_clusters.append([engaged_centroid or engaged_pairs for cluster_id in range(n_clusters)])
+    # By the end of the cluster iteration, any indices remaining in the set correspond to noise points
+    #n_noise = len(all_indices)
+    print(f"Noise: {n_noise}")
 
     # Calculate the engagement score based on truly engaged groups
     cluster_engagement = truly_engaged_groups / n_clusters if n_clusters > 0 else 0
@@ -211,7 +257,9 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     size_boost = min(avg_cluster_size / 10, 1)  # Normalize the average size to [0, 1] range by assuming maximum size to be 10
     boosted_cluster_engagement = cluster_engagement * (1 + size_boost)
     
-    if boosted_cluster_engagement > 1:
+    if boosted_cluster_engagement > 1.2:
+        boosted_cluster_engagement = 1.2
+    elif boosted_cluster_engagement > 1:
         boosted_cluster_engagement = 1.1
 
     return boosted_cluster_engagement, n_clusters, n_noise
@@ -238,10 +286,15 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     normalized_count = normalize_head_count(head_count)
     
     # Calculate the noise penalty as the ratio of noise points to total points
-    noise_penalty = n_noise / len(head_centers) if len(head_centers) > 0 else 0
+    noise_ratio = (n_noise / len(head_centers) if len(head_centers) > 0 else 0)
+    noise_penalty = noise_ratio**2
+    print(f"noisepenalty: {noise_penalty}")
     
+    print(cluster_engagement)
     # Subtract the noise penalty from the cluster engagement score
     cluster_engagement = cluster_engagement * (1 - noise_penalty) 
+
+    # Subtract the noise penalty from the cluster engagement score
 
     INITIAL_THRESHOLD = 10  # Number of initial frames to use weighted average
     THRESHOLD = 30  # Number of frames to carry over previous score
@@ -260,17 +313,19 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
         no_cluster_frames = 0
         initial_frames = 0
         engagement_score = 0.4 * proximity_score + 0.5 * cluster_engagement + 0.1 * normalized_count
+    print(f"Clusters: {n_clusters}")
+    if engagement_score > 1:
+        engagement_score = 1
 
-    
     return engagement_score, n_clusters, n_noise
 
-model = YOLO("./models/yolotrainedruns/detect/train/weights/best.pt")
+model = YOLO("./models/best.pt")
 model.conf=0.20
 
 # Rectangle color
 rect_color = (235, 64, 52)
 
-video_path = "./videos/istockphoto-1259059865-640_adpp_is.mp4"
+video_path = "./videos/istockphoto-1183987999-640_adpp_is.mp4"
 
 engagement_scores=[]
 
@@ -288,12 +343,6 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
     boxes = result.boxes.data
     class_indices = boxes[:, 4].tolist()
 
-    # Set default class for all unrecognized classes
-    default_class_index = 1  # change this to the index of your default class
-
-    class_names = [result.names.get(i, result.names[default_class_index]) for i in class_indices]
-    print(class_names)
-    
     # Extract the bounding boxes
     boxes = [box[:4] for box in detections]
 
@@ -301,7 +350,10 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
     head_centers = [(int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)) for box in boxes]
 
     # Get the track IDs for each detection
-    ids = result.boxes.id.tolist()  # Convert tensor to list
+    if result.boxes is not None and hasattr(result.boxes, 'id') and result.boxes.id is not None:
+        ids = result.boxes.id.tolist()  # Convert tensor to list
+    else:
+        ids = []
 
     # Calculate head angles
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
@@ -309,9 +361,6 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
     # Map each ID to its corresponding angle
     id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
 
-    for id_, angle in id_to_angle.items():
-        most_probable_angle_index = np.argmax(angle)
-        print(f"ID: {id_}, Most Probable Angle Index: {most_probable_angle_index}, Angle Value: {angle[most_probable_angle_index]}")
     # Calculate engagement score
     engagement_score, n_clusters, n_noise = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
@@ -330,10 +379,3 @@ for result in model.track(source=video_path, show=True, stream=True, agnostic_nm
 
     # Print the smoothed engagement score
     print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
-
-
-    # Break the loop if the 'ESC' key is pressed
-    if cv2.waitKey(1) & 0xFF == 27:
-        break
-
-cv2.destroyAllWindows()

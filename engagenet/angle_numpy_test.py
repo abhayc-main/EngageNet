@@ -83,21 +83,16 @@ def calculate_proximity_score(head_centers, image_width, image_height):
     
     return proximity_score
 
-def select_algorithm(number_of_people, density_variation, cluster_shapes, noise_level):
+def select_algorithm(number_of_people, density_variation):
     threshold = 0.5  # Define the threshold value
-    desired_clusters = 2  # Define the desired number of clusters
-
     if number_of_people < 5:
-        return DBSCAN(eps=1.5, min_samples=2)
-    elif density_variation > threshold and cluster_shapes == 'circular':
-        return HDBSCAN(min_cluster_size=2)
-    elif noise_level < threshold:
-        return KMeans(n_clusters=desired_clusters)
-    elif cluster_shapes == 'linear':
-        return AgglomerativeClustering(n_clusters=desired_clusters, linkage='ward')
+        print("1st one")
+        return DBSCAN(eps=1, min_samples=2)
+    elif density_variation > threshold:
+        print("2nd")
+        return DBSCAN(eps = 0.25,min_samples=2)
     else:
-        return DBSCAN(eps=1.5, min_samples=4)
-
+        return DBSCAN(eps=0.5, min_samples=4)
 
 def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     if previous_clusters is None:
@@ -115,41 +110,52 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     pairwise_distances_matrix = pairwise_distances(X)
     density_variation = np.std(pairwise_distances_matrix)
 
-    # Calculate the eigenvalues of the covariance matrix to determine cluster shapes
-    cov_matrix = np.cov(X.T)
-    eigenvalues = np.linalg.eigvals(cov_matrix)
-    cluster_shapes = 'circular' if np.allclose(eigenvalues[0], eigenvalues[1], atol=0.1) else 'linear'
 
     # Apply DBSCAN clustering to calculate noise level
-    clustering = DBSCAN(eps=1.5, min_samples=2).fit(X)
-    labels = clustering.labels_
-    n_noise = list(labels).count(-1)
-    noise_level = n_noise / len(head_centers) if len(head_centers) > 0 else 0
-
-    # Select the clustering algorithm
-    clustering_algorithm = select_algorithm(len(head_centers), density_variation, cluster_shapes, noise_level)
+    # Determine the clustering algorithm based on the select_algorithm function
+    clustering_algorithm = select_algorithm(len(head_centers), density_variation)
 
     # Apply the selected clustering algorithm
     clustering = clustering_algorithm.fit(X)
     labels = clustering.labels_
-    
-    # Calculate the number of clusters and noise points
-    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+
+    # Calculate the number of noise points
     n_noise = list(labels).count(-1)
+    print(n_noise)
+
+    # Calculate the noise level
+    noise_level = n_noise / len(head_centers) if len(head_centers) > 0 else 0
+    print(noise_level)
+
+    # Select the clustering algorithm
+    
+    print(f"Labels {labels}")
+    # Create a set of all data point indices
+    all_indices = set(range(len(head_centers)))
+    
+
+    # Calculate the number of clusters excluding noise
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     
     engaged_groups = 0
     total_size = 0
-    
+    print(f"Noise: {n_noise}")
+
     # Iterate over each cluster
     for cluster_id in range(n_clusters):
         indices = np.where(labels == cluster_id)[0]
+        
+        # Remove the indices of data points that belong to a cluster from the all_indices set
+        all_indices -= set(indices.tolist())
+        
         if len(indices) < 2:
             continue
-        
-        indices_list = indices.tolist()
 
-        group_angles = np.array([head_angles[i] for i in indices_list])  # Convert to NumPy array
-        group_centers = np.array([head_centers[i] for i in indices_list])
+        # Remove the indices of data points that belong to a cluster from the all_indices set
+        all_indices -= set(indices.tolist())
+        
+        group_angles = np.array([head_angles[i] for i in indices])  # Convert to NumPy array
+        group_centers = np.array([head_centers[i] for i in indices])
 
         # Calculate the centroid of the current cluster
         centroid = np.mean(group_centers, axis=0)
@@ -186,17 +192,12 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
             engaged_groups += 1
         
         total_size += len(indices)
+        print(f"Noise in loop: {n_noise}")
 
-        # Check if the group is engaged based on existing conditions
-        if engaged_centroid or engaged_pairs:
-            engaged_groups += 1
 
-            # Check if the cluster has been engaged for the last 'threshold' frames
-            if len(previous_clusters) >= threshold and all(prev_cluster[cluster_id] for prev_cluster in previous_clusters[-threshold:]):
-                truly_engaged_groups += 1
-
-    # Store the current clusters as previous clusters for the next frame
-    previous_clusters.append([engaged_centroid or engaged_pairs for cluster_id in range(n_clusters)])
+    # By the end of the cluster iteration, any indices remaining in the set correspond to noise points
+    #n_noise = len(all_indices)
+    print(f"Noise: {n_noise}")
 
     # Calculate the engagement score based on truly engaged groups
     cluster_engagement = truly_engaged_groups / n_clusters if n_clusters > 0 else 0
@@ -209,8 +210,14 @@ def calculate_cluster_engagement(head_centers, head_angles, previous_clusters):
     size_boost = min(avg_cluster_size / 10, 1)  # Normalize the average size to [0, 1] range by assuming maximum size to be 10
     boosted_cluster_engagement = cluster_engagement * (1 + size_boost)
     
+    if boosted_cluster_engagement > 1.2:
+        boosted_cluster_engagement = 1.2
+    elif boosted_cluster_engagement > 1:
+        boosted_cluster_engagement = 1.1
 
     return boosted_cluster_engagement, n_clusters, n_noise
+
+
 
 # Function to normalize head count to be between 0 and 1
 def normalize_head_count(head_count):
@@ -235,10 +242,15 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     normalized_count = normalize_head_count(head_count)
     
     # Calculate the noise penalty as the ratio of noise points to total points
-    noise_penalty = n_noise / len(head_centers) if len(head_centers) > 0 else 0
+    noise_ratio = (n_noise / len(head_centers) if len(head_centers) > 0 else 0)
+    noise_penalty = noise_ratio**2
+    print(f"noisepenalty: {noise_penalty}")
     
+    print(cluster_engagement)
     # Subtract the noise penalty from the cluster engagement score
     cluster_engagement = cluster_engagement * (1 - noise_penalty) 
+
+    # Subtract the noise penalty from the cluster engagement score
 
     INITIAL_THRESHOLD = 10  # Number of initial frames to use weighted average
     THRESHOLD = 30  # Number of frames to carry over previous score
@@ -257,14 +269,19 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
         no_cluster_frames = 0
         initial_frames = 0
         engagement_score = 0.4 * proximity_score + 0.5 * cluster_engagement + 0.1 * normalized_count
-    print(cluster_engagement)
-
+    print(f"Clusters: {n_clusters}")
     if engagement_score > 1:
         engagement_score = 1
+
     return engagement_score, n_clusters, n_noise
 
-# Assuming an image dimension for context in proximity calculations (can be adjusted)
 image_width, image_height = 40, 40
+
+def generate_randomly_scattered_points(num_points):
+    """Generate randomly scattered points across the image."""
+    x = np.random.uniform(0, image_width, num_points)
+    y = np.random.uniform(0, image_height, num_points)
+    return list(zip(x, y))
 
 def generate_very_tight_natural_circular_crowds(num_clusters, cluster_size, cluster_radius):
     all_points = []
@@ -302,37 +319,37 @@ def generate_angles_towards_centroid(points, num_clusters, cluster_size, towards
             angles.append(angle)
     return angles
 
-
 # Parameters for data generation
-num_clusters = 5
-cluster_size = 10
+num_clusters = 2
+cluster_size = 5
 cluster_radius = 1.5
 
 # Generate the points for very tight natural circular crowds
-all_points_very_tight_natural_crowd_circular = generate_very_tight_natural_circular_crowds(num_clusters, cluster_size, cluster_radius)
+all_points2 = generate_very_tight_natural_circular_crowds(num_clusters, cluster_size, cluster_radius)
 
 # Generate head angles for engaged scenario (facing towards the centroid of their clusters)
-head_angles_circular_engaged_towards_centroid = generate_angles_towards_centroid(all_points_very_tight_natural_crowd_circular, num_clusters, cluster_size, towards=True)
+head_angles2 = generate_angles_towards_centroid(all_points2, num_clusters, cluster_size, towards=True)
 
-head_count = len(all_points_very_tight_natural_crowd_circular)
 
-# Engagement Calculation for engaged scenario
-engagement_score_engaged, n_clusters_engaged, n_noise_engaged = calculate_engagement(
-    all_points_very_tight_natural_crowd_circular, 
-    head_angles_circular_engaged_towards_centroid, 
-    head_count,
-    image_height=image_height, 
-    image_width=image_width,
-    previous_clusters=None
-)
+# Number of scattered points and cluster size
+num_scattered_points = 10
 
-# Generate head angles for unengaged scenario (facing away from the centroid of their clusters)
-head_angles_circular_unengaged_away_from_centroid = generate_angles_towards_centroid(all_points_very_tight_natural_crowd_circular, num_clusters, cluster_size, towards=False)
+# Generate scattered points
+scattered_points = generate_randomly_scattered_points(num_scattered_points)
+
+
+# Combine scattered points and cluster points
+all_points = scattered_points + all_points2
+
+# Generate random orientations for scattered points and oriented angles for the cluster
+head_angles = list(np.random.uniform(0, 360, num_scattered_points)) + head_angles2
+
+head_count = (len(all_points))
 
 # Engagement Calculation for unengaged scenario
 engagement_score_unengaged, n_clusters_unengaged, n_noise_unengaged = calculate_engagement(
-    all_points_very_tight_natural_crowd_circular, 
-    head_angles_circular_unengaged_away_from_centroid, 
+    all_points, 
+    head_angles, 
     head_count,
     image_height=image_height, 
     image_width=image_width,
@@ -340,8 +357,7 @@ engagement_score_unengaged, n_clusters_unengaged, n_noise_unengaged = calculate_
 )
 
 # Print results
-print(f"Engagement Score (Engaged Scenario - Facing Towards Centroid): {engagement_score_engaged}")
-print(f"Engagement Score (Unengaged Scenario - Facing Away from Centroid): {engagement_score_unengaged}")
+print(f"Engagement Score Slight Scenario): {engagement_score_unengaged}")
 
 # Adjust arrow plotting for better visualization
 def plot_points_with_angles(points, angles, title):
@@ -361,7 +377,6 @@ def plot_points_with_angles(points, angles, title):
     plt.show()
 
 # Plot points for engaged scenario
-plot_points_with_angles(all_points_very_tight_natural_crowd_circular, head_angles_circular_engaged_towards_centroid, "Engaged Scenario - Facing Towards Centroid")
+plot_points_with_angles(all_points, head_angles, "Engaged Scenario")
 
-# Plot points for unengaged scenario
-plot_points_with_angles(all_points_very_tight_natural_crowd_circular, head_angles_circular_unengaged_away_from_centroid, "Unengaged Scenario - Facing Away from Centroid")
+
