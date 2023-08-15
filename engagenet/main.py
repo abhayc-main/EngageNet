@@ -31,8 +31,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")\
-device = torch.device("mps")
+device = torch.device("cuda")
 
 import onnxruntime as ort
 
@@ -66,7 +65,9 @@ import cv2
 # Asynchronous function to send image data and get the angle
 async def send_image(image_data):
     # URL of your Docker server
-    url = "http://localhost:9001/overhead-angle-detection-6lmpn/3?api_key=R5i9d6qtGJCDn0LiaEhe"
+    url = "https://classify.roboflow.com/overhead-angle-detection-6lmpn/3?api_key=R5i9d6qtGJCDn0LiaEhe" # if the wifi is low
+    #url = "http://detect.roboflow.com/overhead-head-detection-cwetj/1?api_key=R5i9d6qtGJCDn0LiaEhe" # If the wifi is fast -> 100mbps above ish
+
     
     # Encode the image data in base64
     encoded_image = base64.b64encode(image_data)
@@ -320,8 +321,12 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
 
     return engagement_score, n_clusters, n_noise
 
-model = YOLO("./models/best.pt")
-model.conf=0.20
+model = YOLO("./models/newbest.pt")
+
+
+
+# Rectangle color
+rect_color = (235, 64, 52)
 
 engagement_scores=[]
 
@@ -331,47 +336,42 @@ previous_engagement_score = 0
 no_cluster_frames = 0
 initial_frames = 0
 
-# Loop through the tracking results
-for result in model.track(source=0, show=True, stream=True, agnostic_nms=True):
+import threading
+
+def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames):
     frame = result.orig_img
     detections = result.boxes.xyxy 
-     # Get the bounding boxes and class labels
     boxes = result.boxes.data
     class_indices = boxes[:, 4].tolist()
-
-    # Extract the bounding boxes
     boxes = [box[:4] for box in detections]
-
-    # Detect head centers
     head_centers = [(int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)) for box in boxes]
 
-    # Get the track IDs for each detection
     if result.boxes is not None and hasattr(result.boxes, 'id') and result.boxes.id is not None:
-        ids = result.boxes.id.tolist()  # Convert tensor to list
+        ids = result.boxes.id.tolist()
     else:
         ids = []
 
-    # Calculate head angles
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
-
-    # Map each ID to its corresponding angle
     id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
 
-    # Calculate engagement score
     engagement_score, n_clusters, n_noise = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
     )
 
     previous_engagement_score = engagement_score
-
-    # Append the engagement score to the list
     engagement_scores.append(engagement_score)
-
-    # Apply exponential smoothing to the engagement scores
     smoothed_scores = exponential_smoothing(engagement_scores)
-
-    # Use the smoothed score for the current frame
     smoothed_engagement_score = smoothed_scores[-1]
 
-    # Print the smoothed engagement score
     print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
+
+frame_counter = 0
+
+# Loop through the tracking results
+for result in model.track(source=1, show=True, stream=True, agnostic_nms=True, conf = 0.20, iou=0.10):
+    frame_counter += 1
+    if frame_counter % 30 != 0:
+        continue
+
+    # Start a new thread to process the frame
+    threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames)).start()
