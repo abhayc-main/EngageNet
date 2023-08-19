@@ -33,17 +33,6 @@ from sklearn.metrics.pairwise import pairwise_distances
 
 device = torch.device("cuda")
 
-import onnxruntime as ort
-
-def load_onnx_model(onnx_path):
-    session = ort.InferenceSession(onnx_path)
-    print("Loaded ONNX model")
-    return session
-
-onnx_path = './models/best.onnx'
-ort_session = load_onnx_model(onnx_path)
-
-
 def preprocess_image(image):
     # Resize the image to the input size expected by the model
     image_resized = cv2.resize(image, (180, 180))
@@ -56,45 +45,24 @@ def preprocess_image(image):
 
     return image
 
-import aiohttp
-import asyncio
-import base64
-import json
-import cv2
+def get_head_angle(cropped_img):
+    # Convert numpy array to a format suitable for YOLO
+    cropped_img_path = "temp_cropped.jpg"
+    cv2.imwrite(cropped_img_path, cropped_img)
 
-# Asynchronous function to send image data and get the angle
-async def send_image(image_data):
-    # URL of your Docker server
-    url = "https://classify.roboflow.com/overhead-angle-detection-6lmpn/3?api_key=R5i9d6qtGJCDn0LiaEhe" # if the wifi is low
-    #url = "http://detect.roboflow.com/overhead-head-detection-cwetj/1?api_key=R5i9d6qtGJCDn0LiaEhe" # If the wifi is fast -> 100mbps above ish
+    # Load the model
+    model = YOLO("./models/angle_best.pt")
 
-    
-    # Encode the image data in base64
-    encoded_image = base64.b64encode(image_data)
+    # Get predictions
+    results = model(cropped_img_path)  # results list
 
-    # Headers
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    # Send the request using aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=encoded_image, headers=headers) as response:
-            response_data = await response.text()
-            response_json = json.loads(response_data)
-            # Return the angle with the highest confidence
-            return response_json['top']
-
-# Function to get head angle
-def get_head_angle(head_crop):
-    # Convert the cropped head image to bytes
-    _, buffer = cv2.imencode('.png', head_crop)
-    image_data = buffer.tobytes()
-
-    # Use asyncio loop to run the asynchronous function
-    angle = asyncio.run(send_image(image_data))
-    print(f"Angle returned: {angle}")
-    return angle
+    # Extract the class name for the top detected class (angle)
+    top_detected_class_name = None
+    for r in results:
+        top_detected_class_index = r.probs.top1  # Extracting the index of the top detected class (angle)
+        top_detected_class_name = r.names[top_detected_class_index]  # Getting the class name using the index
+    print(f"Angle Returned {top_detected_class_name}")
+    return top_detected_class_name
 
 # Function to calculate proximity score based on head positions
 def calculate_proximity_score(head_centers, image_width, image_height):
@@ -321,9 +289,42 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
 
     return engagement_score, n_clusters, n_noise
 
+import curses
+
+def display_score(stdscr, score, clusters, noise):
+    # Clear the screen
+    stdscr.clear()
+
+    # Turn off cursor blinking
+    curses.curs_set(0)
+
+    # Get the size of the window
+    height, width = stdscr.getmaxyx()
+
+    # Prepare the texts
+    score_text = f"Engagement Score: {score:.2f}"
+    clusters_text = f"Clusters: {clusters}"
+    noise_text = f"Noise: {noise}"
+
+    # Calculate the position to center the texts
+    x_score = width // 2 - len(score_text) // 2
+    y_score = height // 2 - 2
+
+    x_clusters = width // 2 - len(clusters_text) // 2
+    y_clusters = height // 2
+
+    x_noise = width // 2 - len(noise_text) // 2
+    y_noise = height // 2 + 2
+
+    # Display the texts
+    stdscr.addstr(y_score, x_score, score_text)
+    stdscr.addstr(y_clusters, x_clusters, clusters_text)
+    stdscr.addstr(y_noise, x_noise, noise_text)
+
+    # Refresh the screen
+    stdscr.refresh()
+
 model = YOLO("./models/newbest.pt")
-
-
 
 # Rectangle color
 rect_color = (235, 64, 52)
@@ -338,7 +339,7 @@ initial_frames = 0
 
 import threading
 
-def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames):
+def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr):
     frame = result.orig_img
     detections = result.boxes.xyxy 
     boxes = result.boxes.data
@@ -363,15 +364,23 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     smoothed_scores = exponential_smoothing(engagement_scores)
     smoothed_engagement_score = smoothed_scores[-1]
 
-    print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
+    display_score(stdscr, smoothed_engagement_score, n_clusters, n_noise)
 
-frame_counter = 0
+def main(stdscr):
+    model = YOLO("./models/newbest.pt")
+    rect_color = (235, 64, 52)
+    engagement_scores = []
+    previous_clusters = None
+    previous_engagement_score = 0
+    no_cluster_frames = 0
+    initial_frames = 0
+    frame_counter = 0
 
-# Loop through the tracking results
-for result in model.track(source=1, show=True, stream=True, agnostic_nms=True, conf = 0.20, iou=0.10):
-    frame_counter += 1
-    if frame_counter % 30 != 0:
-        continue
+    for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
+        frame_counter += 1
+        if frame_counter % 30 != 0:
+            continue
+        threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr)).start()
 
-    # Start a new thread to process the frame
-    threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames)).start()
+# Run the main function with curses
+curses.wrapper(main)
