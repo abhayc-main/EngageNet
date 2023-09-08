@@ -1,16 +1,22 @@
-// page.js
+"use client"
 
 import React, { useEffect, useState } from 'react';
 import Layout from './layout';
-import Card from './components/card';
+import Card from '/Users/abhay/Documents/EngageNet/client/components/home/card';
 import { LineChart, Line } from 'recharts';
 import io from 'socket.io-client';
 
+type DataType = {
+  score: number;
+  // add other properties if there are any
+};
+
 export default function Page() {
-  const [data, setData] = useState([]);
+  const [data, setData] = useState<DataType[]>([]);
 
   useEffect(() => {
-    const socket = io('/'); // Connect to the server
+    // Connect to the ./api/data endpoint
+    const socket = io('/api/data');
 
     socket.on('updateData', (newData) => {
       setData(newData); // Update data whenever the server emits 'updateData'
@@ -22,7 +28,8 @@ export default function Page() {
   }, []);
 
   return (
-    <Layout>
+    <div>
+      <h1>Hello</h1>
       <div className="w-full max-w-4xl space-y-6">
         <Card>
           <h2 className="text-xl font-bold mb-4">Engagement Scores Graph</h2>
@@ -37,6 +44,6 @@ export default function Page() {
           </p>
         </Card>
       </div>
-    </Layout>
+    </div>
   );
 }

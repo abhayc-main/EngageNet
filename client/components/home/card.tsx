@@ -1,14 +1,13 @@
-// components/Card.tsx
-import React, { ReactNode } from 'react';
+type CardProps = {
+  children: React.ReactNode | React.ReactNode[];
+};
 
-interface CardProps {
-  children: ReactNode;
-}
-
-export default function Card(children : ReactNode) {
+const Card: React.FC<CardProps> = ({ children }) => {
   return (
-    <div className="bg-white p-5 rounded-lg shadow-md">
+    <div className="card">
       {children}
     </div>
   );
-}
+};
+
+export default Card;

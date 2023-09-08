@@ -1,16 +1,14 @@
 // layout.tsx
 import React, { ReactNode } from 'react';
 
-interface LayoutProps {
+type LayoutProps = {
   children: ReactNode;
 }
 
-export default function Card(children : ReactNode){
+export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col justify-center items-center">
       {children}
     </div>
   );
 }
-
-

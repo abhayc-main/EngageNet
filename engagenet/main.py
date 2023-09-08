@@ -3,6 +3,8 @@ import threading
 import numpy as np
 import math
 import time
+
+import requests
 import torch
 from ultralytics import YOLO
 import os
@@ -363,6 +365,14 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     engagement_scores.append(engagement_score)
     smoothed_scores = exponential_smoothing(engagement_scores)
     smoothed_engagement_score = smoothed_scores[-1]
+
+    data = {
+        'engagement_score': smoothed_engagement_score,
+        'n_clusters': n_clusters,
+        'n_noise': n_noise
+    }
+    
+    response = requests.post('http://localhost:3000/api/data', json=data)
 
     display_score(stdscr, smoothed_engagement_score, n_clusters, n_noise)
 
