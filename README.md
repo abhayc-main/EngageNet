@@ -1,5 +1,6 @@
-# EngageNet
-A crowd/audience engagement measurement system using multiple metrics.
+![Screenshot 2023-09-10 at 8 49 58 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/60ad3ee4-78ce-409a-bd7a-7e96dd917f0d)
+
+##### A crowd/audience engagement measurement system using multiple metrics.
 
 ### Metrics/Code flow
 MAIN MODEL
@@ -56,4 +57,6 @@ Combine the scores for these
 90: 2806 files
 
 
-###### Issues
+###### Demo
+![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
+
