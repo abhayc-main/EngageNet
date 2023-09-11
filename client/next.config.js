@@ -5,11 +5,14 @@ const nextConfig = {
   images: {
     domains: ["lh3.googleusercontent.com", "vercel.com"],
   },
+  experimental: {
+    serverActions: true,
+  },
   async redirects() {
     return [
       {
         source: "/github",
-        destination: "https://github.com/steven-tey/precedent",
+        destination: "https://github.com/abhayc-glitch",
         permanent: false,
       },
     ];

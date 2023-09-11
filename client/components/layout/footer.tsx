@@ -9,7 +9,7 @@ export default function Footer() {
           target="_blank"
           rel="noopener noreferrer"
         >
-          Abhay
+          Abhay Chebium working with UIUC
         </a>
       </p>
     </div>

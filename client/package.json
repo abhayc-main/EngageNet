@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "prisma generate && next dev",
+    "dev": "next dev",
+    "start:socket": "node socketServer.ts",
     "build": "prisma generate && prisma db push && next build",
     "format:write": "prettier --write \"**/*.{css,js,json,jsx,ts,tsx}\"",
     "format": "prettier \"**/*.{css,js,json,jsx,ts,tsx}\"",
@@ -23,6 +24,7 @@
     "@vercel/og": "^0.0.26",
     "bufferutil": "^4.0.7",
     "classnames": "^2.3.2",
+    "clsx": "^2.0.0",
     "eslint": "8.31.0",
     "eslint-config-next": "13.1.1",
     "focus-trap-react": "^10.0.2",

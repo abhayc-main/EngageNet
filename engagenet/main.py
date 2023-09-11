@@ -33,6 +33,12 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
+import socketio
+import time
+
+sio = socketio.Client()
+sio.connect('http://localhost:3001')
+
 device = torch.device("cuda")
 
 def preprocess_image(image):
@@ -289,61 +295,26 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     if engagement_score > 1:
         engagement_score = 1
 
-    return engagement_score, n_clusters, n_noise
+    return engagement_score, n_clusters, n_noise, head_count
 
-import curses
+import socketio
+import threading
 
-def display_score(stdscr, score, clusters, noise):
-    # Clear the screen
-    stdscr.clear()
+sio = socketio.Client()
+sio.connect('http://localhost:3001')
 
-    # Turn off cursor blinking
-    curses.curs_set(0)
-
-    # Get the size of the window
-    height, width = stdscr.getmaxyx()
-
-    # Prepare the texts
-    score_text = f"Engagement Score: {score:.2f}"
-    clusters_text = f"Clusters: {clusters}"
-    noise_text = f"Noise: {noise}"
-
-    # Calculate the position to center the texts
-    x_score = width // 2 - len(score_text) // 2
-    y_score = height // 2 - 2
-
-    x_clusters = width // 2 - len(clusters_text) // 2
-    y_clusters = height // 2
-
-    x_noise = width // 2 - len(noise_text) // 2
-    y_noise = height // 2 + 2
-
-    # Display the texts
-    stdscr.addstr(y_score, x_score, score_text)
-    stdscr.addstr(y_clusters, x_clusters, clusters_text)
-    stdscr.addstr(y_noise, x_noise, noise_text)
-
-    # Refresh the screen
-    stdscr.refresh()
-
-model = YOLO("./models/newbest.pt")
-
-# Rectangle color
+model = YOLO("./models/best.pt")
 rect_color = (235, 64, 52)
-
-engagement_scores=[]
-
+engagement_scores = []
 previous_clusters = None
-
 previous_engagement_score = 0
 no_cluster_frames = 0
 initial_frames = 0
+frame_counter = 0
 
-import threading
-
-def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr):
+def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames):
     frame = result.orig_img
-    detections = result.boxes.xyxy 
+    detections = result.boxes.xyxy
     boxes = result.boxes.data
     class_indices = boxes[:, 4].tolist()
     boxes = [box[:4] for box in detections]
@@ -357,7 +328,7 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
     id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
 
-    engagement_score, n_clusters, n_noise = calculate_engagement(
+    engagement_score, n_clusters, n_noise, head_count = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
     )
 
@@ -368,29 +339,17 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
 
     data = {
         'engagement_score': smoothed_engagement_score,
+        'n_total': head_count,
         'n_clusters': n_clusters,
         'n_noise': n_noise
     }
     
-    response = requests.post('http://localhost:3000/api/data', json=data)
+    sio.emit('dataUpdate', data)
+    print(data)
+    print("sent")
 
-    display_score(stdscr, smoothed_engagement_score, n_clusters, n_noise)
-
-def main(stdscr):
-    model = YOLO("./models/newbest.pt")
-    rect_color = (235, 64, 52)
-    engagement_scores = []
-    previous_clusters = None
-    previous_engagement_score = 0
-    no_cluster_frames = 0
-    initial_frames = 0
-    frame_counter = 0
-
-    for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
-        frame_counter += 1
-        if frame_counter % 30 != 0:
-            continue
-        threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr)).start()
-
-# Run the main function with curses
-curses.wrapper(main)
+for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
+    frame_counter += 1
+    if frame_counter % 30 != 0:
+        continue
+    threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames)).start()

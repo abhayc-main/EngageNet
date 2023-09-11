@@ -1,20 +1,17 @@
-// pages/api/data.js
+// ./pages/api/data.ts
+import type { NextApiRequest, NextApiResponse } from 'next'
 
-let engagement_score = 0;
-let n_clusters = 0;
-let n_noise = 0;
+type Data = {
+  engagement_score: number,
+  n_clusters: number,
+  n_noise: number
+}
 
-export default (req : any, res : any) => {
+export default function handler(req: NextApiRequest, res: NextApiResponse<Data>) {
   if (req.method === 'POST') {
-    engagement_score = req.body.engagement_score;
-    n_clusters = req.body.n_clusters;
-    n_noise = req.body.n_noise;
-    res.status(200).send('Data updated successfully');
+    const data: Data = req.body
+    res.status(200).json(data)
   } else {
-    res.status(200).json({
-      engagement_score: engagement_score,
-      n_clusters: n_clusters,
-      n_noise: n_noise
-    });
+    res.status(405).end() // Method Not Allowed
   }
-};
+}
