@@ -2,6 +2,41 @@
 
 ##### A crowd/audience engagement measurement system using multiple metrics.
 
+## Get Started
+
+### Installation
+
+#### Models
+1. Acquire the trained models (.pt yolo files) -> email me at abhichebium@gmail.com for access
+2. Put the downloaded models in the `./engagenet/models/` folder
+3. Make sure the names are `best.pt` and `angle_best.pt`
+
+#### UI
+1. Clone the whole repository and navigate to the `./client` folder
+2. Make sure you have `Node.js` and `npm/yarn` installed.
+3. Run `npm install` in the `./client` root directory to install all the dependecies
+
+#### Detection/Algorithm code
+1. Navigate to the `./engagenet` folder
+2. Make sure to have `python 3.9.6` installed.
+3. Activate a virtual env if you prefer it
+4. Run `pip install -r requirements.txt`
+
+### Usage
+###### At this point your folder should look like this
+<img width="126" alt="image" src="https://github.com/abhayc-glitch/EngageNet/assets/78511893/3796a406-edd9-47bd-9a43-cc76e11aa714">
+
+
+1. I recommend having 3 different terminal windows - client, socket server and python detection code
+2. In the first window, navigate to the `./client` directory and run `npm run dev` to start the `NextJS` app
+3. In the second window and the same directory run `npm run start:socket`, this will start the socketIO server
+4. Now navigate to the `./engagenet` directory and run `python main.py`
+> ⚠️: **Make sure to connect your Webcam/Camera through USB**: Switch up the camera source in `main.py` if your camera is not being recognized
+5. Now drag the python window that pops with the live feed on top of the UI box that says place here
+> In the end it should look like this
+![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
+
+
 ### Metrics/Code flow
 MAIN MODEL
 
@@ -55,8 +90,4 @@ Combine the scores for these
 315: 2978 files
 45: 2996 files
 90: 2806 files
-
-
-###### Demo
-![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
 
