@@ -37,6 +37,10 @@
 ![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
 
 
+### CLI
+If you want to use just the CLI and not the UI, navigate to the `./engagenet` directory and run `python cli.py`
+
+
 ### Metrics/Code flow
 MAIN MODEL
 
