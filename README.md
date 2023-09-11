@@ -1,6 +1,17 @@
 ![Screenshot 2023-09-10 at 8 49 58 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/60ad3ee4-78ce-409a-bd7a-7e96dd917f0d)
 
-##### A crowd/audience engagement measurement system using multiple metrics.
+### A crowd/audience engagement measurement leveraging Overhead Cameras with Clustering and Euclidean Metrics
+
+#### Enhancing Scientific Interactions in Conferences: A Novel Approach Using Overhead Camera Pose Estimation with Clustering and Euclidean Metrics
+
+#### Features
+**Overhead Camera Pose Estimation:** Utilizing overhead camera pose estimation, the system effectively tracks and analyzes the dynamics of scientific discussions, providing unparalleled insight into interaction patterns.
+
+**Live Interaction Analysis:** Cameras strategically placed over the conference venue capture live footage of researchers during pivotal moments of their discussions, offering a real-time view into the heart of the conference.
+
+**Data-Driven Conference Improvement:** Beyond merely capturing interactions, this project enables organizers to use the acquired data to make informed decisions, optimize conference layouts, and enhance the overall attendee experience.
+
+**Advanced Scoring using euclidean metrics:** By assessing parameters such as proximity, duration, and frequency of interactions, it calculates a comprehensive 'interaction score' that offers quantifiable insights into the effectiveness of exchanges among researchers. 
 
 ## Get Started
 
