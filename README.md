@@ -34,11 +34,15 @@
 > ⚠️: **Make sure to connect your Webcam/Camera through USB**: Switch up the camera source in `main.py` if your camera is not being recognized
 5. Now drag the python window that pops with the live feed on top of the UI box that says place here
 > In the end it should look like this
+> 
 ![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
 
 
 ### CLI
 If you want to use just the CLI and not the UI, navigate to the `./engagenet` directory and run `python cli.py`
+> It should end up looking like this
+>
+<img width="796" alt="image" src="https://github.com/abhayc-glitch/EngageNet/assets/78511893/7af4c46b-4ac2-45aa-9b9a-383e48690d90">
 
 
 ### Metrics/Code flow
