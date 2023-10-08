@@ -1,8 +1,9 @@
 import cv2
 import threading
 import numpy as np
-import math
-import time
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
 import torch
 from ultralytics import YOLO
 import os
@@ -337,6 +338,10 @@ previous_engagement_score = 0
 no_cluster_frames = 0
 initial_frames = 0
 
+# For tracking raw interaction measures
+interaction_counts_per_frame = []
+interaction_durations_per_frame = []
+
 import threading
 
 def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr):
@@ -353,7 +358,19 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
         ids = []
 
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
-    id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
+    
+    interactions_this_frame = []
+    durations_this_frame = []
+    for i, (id1, center1) in enumerate(zip(ids, head_centers)):
+        for j, (id2, center2) in enumerate(zip(ids, head_centers)):
+            if id1 != id2:  # Exclude self-interaction
+                distance = math.sqrt((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)
+                if distance < 50:
+                    interactions_this_frame.append(id1)
+                    durations_this_frame.append(distance)
+                    
+    interaction_counts_per_frame.append(len(interactions_this_frame))
+    interaction_durations_per_frame.extend(durations_this_frame)
 
     engagement_score, n_clusters, n_noise = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
@@ -365,6 +382,22 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     smoothed_engagement_score = smoothed_scores[-1]
 
     display_score(stdscr, smoothed_engagement_score, n_clusters, n_noise)
+
+def plot_cdf(data, title):
+    data_size = len(data)
+    data_set = sorted(set(data))
+    bins = np.append(data_set, data_set[-1] + 1)
+    counts, bin_edges = np.histogram(data, bins=bins, density=False)
+    counts = counts.astype(float) / data_size
+    cdf = np.cumsum(counts)
+    plt.plot(bin_edges[0:-1], cdf, linestyle='--', marker="o", color='b')
+    plt.ylim((0, 1))
+    plt.ylabel("CDF")
+    plt.xlabel(title)
+    plt.title(f"CDF of {title}")
+    plt.grid(True)
+    plt.show()
+
 
 def main(stdscr):
     model = YOLO("./models/best.pt")
@@ -381,6 +414,10 @@ def main(stdscr):
         if frame_counter % 30 != 0:
             continue
         threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr)).start()
+
+    # After the tracking loop ends
+    plot_cdf(interaction_counts_per_frame, "Number of Interactions per Frame")
+    plot_cdf(interaction_durations_per_frame, "Duration of Interactions")
 
 # Run the main function with curses
 curses.wrapper(main)

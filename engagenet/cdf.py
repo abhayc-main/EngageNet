@@ -1,15 +1,17 @@
 import cv2
 import threading
 import numpy as np
-import math
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-
 import torch
 from ultralytics import YOLO
+import os
 
-
+import aiohttp
+import asyncio
+import base64
+import json
 import cv2
 
 # SSL certificate issues fix
@@ -29,12 +31,6 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
-
-import socketio
-import time
-
-sio = socketio.Client()
-sio.connect('http://localhost:3001')
 
 device = torch.device("cuda")
 
@@ -292,31 +288,65 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     if engagement_score > 1:
         engagement_score = 1
 
-    return engagement_score, n_clusters, n_noise, head_count
+    return engagement_score, n_clusters, n_noise
 
-import socketio
-import threading
+import curses
 
-sio = socketio.Client()
-sio.connect('http://localhost:3001')
+def display_score(stdscr, score, clusters, noise):
+    # Clear the screen
+    stdscr.clear()
+
+    # Turn off cursor blinking
+    curses.curs_set(0)
+
+    # Get the size of the window
+    height, width = stdscr.getmaxyx()
+
+    # Prepare the texts
+    score_text = f"Engagement Score: {score:.2f}"
+    clusters_text = f"Clusters: {clusters}"
+    noise_text = f"Noise: {noise}"
+
+    # Calculate the position to center the texts
+    x_score = width // 2 - len(score_text) // 2
+    y_score = height // 2 - 2
+
+    x_clusters = width // 2 - len(clusters_text) // 2
+    y_clusters = height // 2
+
+    x_noise = width // 2 - len(noise_text) // 2
+    y_noise = height // 2 + 2
+
+    # Display the texts
+    stdscr.addstr(y_score, x_score, score_text)
+    stdscr.addstr(y_clusters, x_clusters, clusters_text)
+    stdscr.addstr(y_noise, x_noise, noise_text)
+
+    # Refresh the screen
+    stdscr.refresh()
 
 model = YOLO("./models/best.pt")
+
+# Rectangle color
 rect_color = (235, 64, 52)
-engagement_scores = []
+
+engagement_scores=[]
+
 previous_clusters = None
+
 previous_engagement_score = 0
 no_cluster_frames = 0
 initial_frames = 0
-frame_counter = 0
 
-# For tracking CDF measures
-interaction_counts = []
-interaction_durations = []
+# For tracking raw interaction measures
+interaction_counts_per_frame = []
+interaction_durations_per_frame = []
 
+import threading
 
-def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames):
+def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr):
     frame = result.orig_img
-    detections = result.boxes.xyxy
+    detections = result.boxes.xyxy 
     boxes = result.boxes.data
     class_indices = boxes[:, 4].tolist()
     boxes = [box[:4] for box in detections]
@@ -328,22 +358,21 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
         ids = []
 
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
-    interactions_this_frame = defaultdict(int)
+    
+    interactions_this_frame = []
     durations_this_frame = []
     for i, (id1, center1) in enumerate(zip(ids, head_centers)):
         for j, (id2, center2) in enumerate(zip(ids, head_centers)):
             if id1 != id2:  # Exclude self-interaction
                 distance = math.sqrt((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)
-                # Define a threshold for what you consider as interaction. Adjust this value accordingly.
                 if distance < 50:
-                    interactions_this_frame[id1] += 1
-                    # Note: This is a simplistic way to record interaction duration. For more accuracy, track start and end times.
+                    interactions_this_frame.append(id1)
                     durations_this_frame.append(distance)
+                    
+    interaction_counts_per_frame.append(len(interactions_this_frame))
+    interaction_durations_per_frame.extend(durations_this_frame)
 
-    interaction_counts.append(np.mean(list(interactions_this_frame.values())))
-    interaction_durations.extend(durations_this_frame)
-
-    engagement_score, n_clusters, n_noise, head_count = calculate_engagement(
+    engagement_score, n_clusters, n_noise = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
     )
 
@@ -352,23 +381,54 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     smoothed_scores = exponential_smoothing(engagement_scores)
     smoothed_engagement_score = smoothed_scores[-1]
 
-    data = {
-        'engagement_score': smoothed_engagement_score,
-        'n_total': head_count,
-        'n_clusters': n_clusters,
-        'n_noise': n_noise,
-        'interaction_counts_raw': interactions_this_frame,
-        'interaction_durations_raw': durations_this_frame
-    }
-    
-    sio.emit('dataUpdate', data)
-    print(data)
-    print("sent")
+    display_score(stdscr, smoothed_engagement_score, n_clusters, n_noise)
 
-for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
-    frame_counter += 1
-    if frame_counter % 30 != 0:
-        continue
-    threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames)).start()
+def plot_cdf(data, title):
+    data_size = len(data)
+    data_set = sorted(set(data))
+    bins = np.append(data_set, data_set[-1] + 1)
+    counts, bin_edges = np.histogram(data, bins=bins, density=False)
+    counts = counts.astype(float) / data_size
+    cdf = np.cumsum(counts)
+    plt.plot(bin_edges[0:-1], cdf, linestyle='--', marker="o", color='b')
+    plt.ylim((0, 1))
+    plt.ylabel("CDF")
+    plt.xlabel(title)
+    plt.title(f"CDF of {title}")
+    plt.grid(True)
+    plt.show()
 
 
+import time
+
+def main(stdscr):
+    model = YOLO("./models/best.pt")
+    rect_color = (235, 64, 52)
+    engagement_scores = []
+    previous_clusters = None
+    previous_engagement_score = 0
+    no_cluster_frames = 0
+    initial_frames = 0
+    frame_counter = 0
+
+    start_time = time.time()  # Record the start time
+    duration = 20  # Desired duration in seconds
+
+    for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
+        elapsed_time = time.time() - start_time  # Calculate elapsed time
+
+        if elapsed_time > duration:  # If elapsed time is more than the desired duration
+            break  # Exit the loop
+
+        frame_counter += 1
+        if frame_counter % 30 != 0:
+            continue
+
+        threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames, stdscr)).start()
+
+    # After the tracking loop ends or is interrupted
+    plot_cdf(interaction_counts_per_frame, "Number of Interactions per Frame")
+    plot_cdf(interaction_durations_per_frame, "Duration of Interactions")
+
+# Run the main function with curses
+curses.wrapper(main)
