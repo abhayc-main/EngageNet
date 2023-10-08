@@ -2,12 +2,13 @@
 
 "use client"
 
-import useSocketData from '/Users/abhay/Documents/EngageNet/client/lib/hooks/useSocketData';
 import { Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle, } from "@/components/ui/card";
+import RealTimeGraph from '@/components/graph';
+
 
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
 import { LineChart, Line, CartesianGrid, Tooltip } from 'recharts';
@@ -19,25 +20,42 @@ import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:3001');
 
+type EngagementData = {
+    engagement_score: number;
+    n_total: number;
+    n_clusters: number;
+    n_noise: number;
+    interaction_counts_raw: { [key: number]: number };
+    interaction_durations_raw: number[];
+};
+
 
 export default function DashboardPage() {
-
-  const [data, setData] = useState({
+  
+  const [data, setData] = useState<EngagementData>({
     engagement_score: 0,
     n_total: 0,
     n_clusters: 0,
     n_noise: 0,
-  });
+    interaction_counts_raw: {},
+    interaction_durations_raw: []
+});
+
+  const [graphData, setGraphData] = useState<EngagementData[]>([]);
 
   useEffect(() => {
-    socket.on('dataUpdate', (newData) => {
-      setData(newData);
+    socket.on('dataUpdate', (newData: EngagementData) => {
+        setData(newData);
+        setGraphData(prevData => [...prevData, newData]);
     });
 
     return () => {
-      socket.off('dataUpdate');
+        socket.off('dataUpdate');
     };
-  }, [])
+}, []);
+
+
+
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -156,8 +174,17 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-
-      
+      <Card className="col-span-5 row-span-5">
+        <CardHeader>
+          <CardTitle>CDF Graphs</CardTitle>
+          <CardDescription>
+            Cumulative Distribution Function graph - shows us how many times people are interacting or how many times they aren't
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-40 h-screen"> 
+          <RealTimeGraph interactionCounts={data.interaction_counts_raw} interactionDurations={data.interaction_durations_raw} />
+        </CardContent>
+      </Card>
     </div>
     
   );
