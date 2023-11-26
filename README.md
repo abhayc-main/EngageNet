@@ -1,6 +1,17 @@
-![Screenshot 2023-09-10 at 8 49 58 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/60ad3ee4-78ce-409a-bd7a-7e96dd917f0d)
+<h1 align="center">EngageNet</h1>
+<p align="center">
+  A crowd/audience engagement measurement leveraging Overhead Cameras with Clustering and Euclidean Metrics.
+</p>
+<p align="center">
+  <a href="#installation"><strong>Installation</strong></a> ·
+  <a href="#usage"><strong>Local Development</strong></a> ·
+  <a href="#cli"><strong>CLI Tools</strong></a> ·
+  <a href="#code-flow"><strong>Metrics/Code flow</strong></a>
+</p>
 
-### A crowd/audience engagement measurement leveraging Overhead Cameras with Clustering and Euclidean Metrics
+<br/>
+
+![Screenshot 2023-09-10 at 8 49 58 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/60ad3ee4-78ce-409a-bd7a-7e96dd917f0d)
 
 #### Enhancing Scientific Interactions in Conferences: A Novel Approach Using Overhead Camera Pose Estimation with Clustering and Euclidean Metrics
 
@@ -56,57 +67,63 @@ If you want to use just the CLI and not the UI, navigate to the `./engagenet` di
 <img width="796" alt="image" src="https://github.com/abhayc-glitch/EngageNet/assets/78511893/7af4c46b-4ac2-45aa-9b9a-383e48690d90">
 
 
-### Metrics/Code flow
-MAIN MODEL
+## Code Flow
 
-Processing Method - Real-time Frame Detection - Allows for more insights on crowd - processing power will be handled with Intel Neural Processing Stick
+### Real-time Frame Detection System
 
-1. Data Collection:
-    Gather a labeled dataset of crowd videos captured from a top-down camera perspective.
-    Annotate the videos with ground truth labels indicating the engagement level or health of interactions within the crowd.
-    Get around a 200 data images - train model
-    - Use this data for both Head Angle Calculation and Head Detection
+#### 1. Data Collection:
+- **Objective:** Gather and annotate a dataset for training a model to assess crowd engagement and interaction health.
+- **Method:**
+  - Collect a dataset of approximately 200 crowd videos from a top-down camera perspective.
+  - Annotate videos with ground truth labels indicating levels of engagement or interaction health.
+  - Utilize this dataset for both Head Angle Calculation and Head Detection.
 
-##### Metrics for Detection (Summary)
-- Proximity branch: We calculate the proximity score as before. This gives us a measure of how close people are to each other.
-- Angle/cluster branch: We calculate the engagement score based on the angles of the heads and their spatial grouping. This gives us a measure of how much people are interacting with each other.
-- Headcount branch: We count the number of heads in the image. This gives us a measure of how many people are present in the scene.
-Combine the scores for these
+#### 2. Metrics for Detection (Summary):
+- **Proximity Branch:** 
+  - Calculate a proximity score indicating how close individuals are to each other.
+- **Angle/Cluster Branch:** 
+  - Determine engagement score based on head angles and spatial clustering.
+- **Headcount Branch:** 
+  - Count the number of heads in the image to assess crowd size.
+- **Overall Scoring:** 
+  - Combine scores from the above branches for a comprehensive engagement analysis.
 
+#### 3. Metrics for Detection - Detailed Approach:
+- **Head Orientation (50% of total score):** 
+  - Count total heads (N) and heads facing towards the group (F).
+  - Score = (F / N) * 100.
+- **Proximity Analysis (40% of total score):** 
+  - Calculate distances between heads using a distance matrix.
+  - Identify and score head clusters based on proximity.
+  - Normalize scores between 0 (minimal proximity) to 1 (maximum proximity).
+- **Headcount Branch (5% of total score):** 
+  - Simply count the number of heads in the scene.
 
-##### Metrics for Detection - Code
-- Head Orientation - 50%
-    Count the total number of heads in the group (N).
-    Count the number of heads in the group facing towards the rest of the group (F).
-    Calculate the score by dividing F by N and multiplying
-- Proximity Analysis - 40%
-    Calculate the spatial distance between annotated heads. - Distance Matrix
-    Identify clusters of heads based on their proximity to each other.
-    Assign a higher proximity score to heads that belong to larger clusters, indicating higher engagement.
-    Normalize the proximity scores between 0 and 1, where 0 represents minimal proximity and 1 represents maximum proximity engage
-- Headcount Branch - 5% of total score
+#### 4. Angle Classes:
+- Representation of head orientation angles and their corresponding directions:
 
+| Angle | Direction  |
+| ----- | ---------- |
+| 0     | Down       |
+| 45    | Down-Right |
+| 90    | Right      |
+| 135   | Up-Right   |
+| 180   | Up         |
+| 225   | Up-Left    |
+| 270   | Left       |
+| 315   | Down-Left  |
 
-###### Angle Classes
-| Angle | Direction |
-|-------|-----------|
-| 0     | Down      |
-| 45    | Down-Right|
-| 90    | Right     |
-| 135   | Up-Right  |
-| 180   | Up        |
-| 225   | Up-Left   |
-| 270   | Left      |
-| 315   | Down-Left |
+#### 5. Angle Data:
+- Distribution of files across different angle classes:
 
-
-###### Angle Data
-0: 2870 files
-135: 2986 files
-180: 2832 files
-225: 2932 files
-270: 2800 files
-315: 2978 files
-45: 2996 files
-90: 2806 files
+| Angle | Number of Files |
+| ----- | --------------- |
+| 0     | 2870            |
+| 45    | 2996            |
+| 90    | 2806            |
+| 135   | 2986            |
+| 180   | 2832            |
+| 225   | 2932            |
+| 270   | 2800            |
+| 315   | 2978            |
 
