@@ -365,6 +365,7 @@ def process_frame(result, engagement_scores, previous_clusters, previous_engagem
     print(data)
     print("sent")
 
+
 for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
     frame_counter += 1
     if frame_counter % 30 != 0:

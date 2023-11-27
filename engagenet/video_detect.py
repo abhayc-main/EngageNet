@@ -2,15 +2,14 @@ import cv2
 import threading
 import numpy as np
 import math
-import time
+import matplotlib.pyplot as plt
+from collections import defaultdict
+
+
 import torch
 from ultralytics import YOLO
-import os
 
-import aiohttp
-import asyncio
-import base64
-import json
+
 import cv2
 
 # SSL certificate issues fix
@@ -31,18 +30,13 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, HDBSCAN
 from sklearn.metrics.pairwise import pairwise_distances
 
+import socketio
+import time
+
+sio = socketio.Client()
+sio.connect('http://localhost:3001')
+
 device = torch.device("cuda")
-
-import onnxruntime as ort
-
-def load_onnx_model(onnx_path):
-    session = ort.InferenceSession(onnx_path)
-    print("Loaded ONNX model")
-    return session
-
-onnx_path = './models/best.onnx'
-ort_session = load_onnx_model(onnx_path)
-
 
 def preprocess_image(image):
     # Resize the image to the input size expected by the model
@@ -56,45 +50,24 @@ def preprocess_image(image):
 
     return image
 
-import aiohttp
-import asyncio
-import base64
-import json
-import cv2
+def get_head_angle(cropped_img):
+    # Convert numpy array to a format suitable for YOLO
+    cropped_img_path = "temp_cropped.jpg"
+    cv2.imwrite(cropped_img_path, cropped_img)
 
-# Asynchronous function to send image data and get the angle
-async def send_image(image_data):
-    # URL of your Docker server
-    url = "https://classify.roboflow.com/overhead-angle-detection-6lmpn/3?api_key=R5i9d6qtGJCDn0LiaEhe" # if the wifi is low
-    #url = "http://detect.roboflow.com/overhead-head-detection-cwetj/1?api_key=R5i9d6qtGJCDn0LiaEhe" # If the wifi is fast -> 100mbps above ish
+    # Load the model
+    model = YOLO("./models/angle_best.pt")
 
-    
-    # Encode the image data in base64
-    encoded_image = base64.b64encode(image_data)
+    # Get predictions
+    results = model(cropped_img_path)  # results list
 
-    # Headers
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    # Send the request using aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, data=encoded_image, headers=headers) as response:
-            response_data = await response.text()
-            response_json = json.loads(response_data)
-            # Return the angle with the highest confidence
-            return response_json['top']
-
-# Function to get head angle
-def get_head_angle(head_crop):
-    # Convert the cropped head image to bytes
-    _, buffer = cv2.imencode('.png', head_crop)
-    image_data = buffer.tobytes()
-
-    # Use asyncio loop to run the asynchronous function
-    angle = asyncio.run(send_image(image_data))
-    print(f"Angle returned: {angle}")
-    return angle
+    # Extract the class name for the top detected class (angle)
+    top_detected_class_name = None
+    for r in results:
+        top_detected_class_index = r.probs.top1  # Extracting the index of the top detected class (angle)
+        top_detected_class_name = r.names[top_detected_class_index]  # Getting the class name using the index
+    print(f"Angle Returned {top_detected_class_name}")
+    return top_detected_class_name
 
 # Function to calculate proximity score based on head positions
 def calculate_proximity_score(head_centers, image_width, image_height):
@@ -319,73 +292,85 @@ def calculate_engagement(head_centers, head_angles, head_count, image_height, im
     if engagement_score > 1:
         engagement_score = 1
 
-    return engagement_score, n_clusters, n_noise
+    return engagement_score, n_clusters, n_noise, head_count
 
-model = YOLO("./models/newbest.pt")
+import socketio
+import threading
 
+sio = socketio.Client()
+sio.connect('http://localhost:3001')
 
-
-# Rectangle color
+model = YOLO("./models/best.pt")
 rect_color = (235, 64, 52)
-
-video_path = "./videos/istockphoto-1147623213-640_adpp_is.mp4"
-
-engagement_scores=[]
-
+engagement_scores = []
 previous_clusters = None
-
 previous_engagement_score = 0
 no_cluster_frames = 0
 initial_frames = 0
-
 frame_counter = 0
 
-# Loop through the tracking results
-for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True, device="cuda", conf = 0.25, iou=0.20):
-    print(model.device)
-    frame_counter += 1
-    if frame_counter % 30 != 0:
-        continue
+# For tracking CDF measures
+interaction_counts = []
+interaction_durations = []
 
+
+def process_frame(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames):
     frame = result.orig_img
-    detections = result.boxes.xyxy 
-     # Get the bounding boxes and class labels
+    detections = result.boxes.xyxy
     boxes = result.boxes.data
     class_indices = boxes[:, 4].tolist()
-
-    # Extract the bounding boxes
     boxes = [box[:4] for box in detections]
-
-    # Detect head centers
     head_centers = [(int((box[0] + box[2]) / 2), int((box[1] + box[3]) / 2)) for box in boxes]
 
-    # Get the track IDs for each detection
     if result.boxes is not None and hasattr(result.boxes, 'id') and result.boxes.id is not None:
-        ids = result.boxes.id.tolist()  # Convert tensor to list
+        ids = result.boxes.id.tolist()
     else:
         ids = []
 
-    # Calculate head angles
     head_angles = [get_head_angle(frame[int(box[1]):int(box[3]), int(box[0]):int(box[2])]) for box in result.boxes.xyxy]
+    interactions_this_frame = defaultdict(int)
+    durations_this_frame = []
+    for i, (id1, center1) in enumerate(zip(ids, head_centers)):
+        for j, (id2, center2) in enumerate(zip(ids, head_centers)):
+            if id1 != id2:  # Exclude self-interaction
+                distance = math.sqrt((center1[0] - center2[0])**2 + (center1[1] - center2[1])**2)
+                # Define a threshold for what you consider as interaction. Adjust this value accordingly.
+                if distance < 50:
+                    interactions_this_frame[id1] += 1
+                    # Note: This is a simplistic way to record interaction duration. For more accuracy, track start and end times.
+                    durations_this_frame.append(distance)
 
-    # Map each ID to its corresponding angle
-    id_to_angle = {id_: angle for id_, angle in zip(ids, head_angles)}
+    interaction_counts.append(np.mean(list(interactions_this_frame.values())))
+    interaction_durations.extend(durations_this_frame)
 
-    # Calculate engagement score
-    engagement_score, n_clusters, n_noise = calculate_engagement(
+    engagement_score, n_clusters, n_noise, head_count = calculate_engagement(
         head_centers, head_angles, len(boxes), frame.shape[0], frame.shape[1], previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames
     )
 
     previous_engagement_score = engagement_score
-
-    # Append the engagement score to the list
     engagement_scores.append(engagement_score)
-
-    # Apply exponential smoothing to the engagement scores
     smoothed_scores = exponential_smoothing(engagement_scores)
-
-    # Use the smoothed score for the current frame
     smoothed_engagement_score = smoothed_scores[-1]
 
-    # Print the smoothed engagement score
-    print(f"Smoothed Engagement Score: {smoothed_engagement_score}, Clusters: {n_clusters}, Noise Subjects: {n_noise}")
+    data = {
+        'engagement_score': smoothed_engagement_score,
+        'n_total': head_count,
+        'n_clusters': n_clusters,
+        'n_noise': n_noise,
+        'interaction_counts_raw': interactions_this_frame,
+        'interaction_durations_raw': durations_this_frame
+    }
+    
+    sio.emit('dataUpdate', data)
+    print(data)
+    print("sent")
+
+video_path = "/videos/main.mp4"
+
+for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
+    frame_counter += 1
+    if frame_counter % 30 != 0:
+        continue
+    threading.Thread(target=process_frame, args=(result, engagement_scores, previous_clusters, previous_engagement_score, no_cluster_frames, initial_frames)).start()
+
+
