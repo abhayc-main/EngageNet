@@ -1,90 +1,120 @@
-<a href="https://precedent.dev">
-  <img alt="Precedent – Building blocks for your Next project" src="https://precedent.dev/opengraph-image">
-  <h1 align="center">Precedent</h1>
-</a>
-
+<h1 align="center">EngageNet</h1>
 <p align="center">
-  Building blocks for your Next project
+  The nextjs app to go along with the main project code
 </p>
 
-<p align="center">
-  <a href="https://twitter.com/steventey">
-    <img src="https://img.shields.io/twitter/follow/steventey?style=flat&label=steventey&logo=twitter&color=0bf&logoColor=fff" alt="Steven Tey Twitter follower count" />
-  </a>
-  <a href="https://github.com/steven-tey/precedent">
-    <img src="https://img.shields.io/github/stars/steven-tey/precedent?label=steven-tey%2Fprecedent" alt="Precedent repo star count" />
-  </a>
-</p>
 
-<p align="center">
-  <a href="#introduction"><strong>Introduction</strong></a> ·
-  <a href="#one-click-deploy"><strong>One-click Deploy</strong></a> ·
-  <a href="#tech-stack--features"><strong>Tech Stack + Features</strong></a> ·
-  <a href="#author"><strong>Author</strong></a>
-</p>
-<br/>
+#### Enhancing Scientific Interactions in Conferences: A Novel Approach Using Overhead Camera Pose Estimation with Clustering and Euclidean Metrics
 
-## Introduction
+#### Features
+**Overhead Camera Pose Estimation:** Utilizing overhead camera pose estimation, the system effectively tracks and analyzes the dynamics of scientific discussions, providing unparalleled insight into interaction patterns.
 
-Precedent is an opinionated collection of components, hooks, and utilities for your Next.js project.
+**Live Interaction Analysis:** Cameras strategically placed over the conference venue capture live footage of researchers during pivotal moments of their discussions, offering a real-time view into the heart of the conference.
 
-## One-click Deploy
+**Data-Driven Conference Improvement:** Beyond merely capturing interactions, this project enables organizers to use the acquired data to make informed decisions, optimize conference layouts, and enhance the overall attendee experience.
 
-You can deploy this template to Vercel with the button below:
+**Advanced Scoring using euclidean metrics:** By assessing parameters such as proximity, duration, and frequency of interactions, it calculates a comprehensive 'interaction score' that offers quantifiable insights into the effectiveness of exchanges among researchers. 
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fsteven-tey%2Fprecedent&project-name=precedent&repository-name=precedent&demo-title=Precedent&demo-description=An%20opinionated%20collection%20of%20components%2C%20hooks%2C%20and%20utilities%20for%20your%20Next%20project.&demo-url=https%3A%2F%2Fprecedent.dev&demo-image=https%3A%2F%2Fprecedent.dev%2Fopengraph-image&env=GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET,NEXTAUTH_SECRET&envDescription=How%20to%20get%20these%20env%20variables%3A&envLink=https%3A%2F%2Fgithub.com%2Fsteven-tey%2Fprecedent%2Fblob%2Fmain%2F.env.example&stores=%5B%7B"type"%3A"postgres"%7D%5D)
+## Get Started
 
-You can also clone & create this repo locally with the following command:
+### Installation
 
-```bash
-npx create-next-app precedent --example "https://github.com/steven-tey/precedent"
-```
+#### Models
+1. Acquire the trained models (.pt yolo files) -> email me at abhichebium@gmail.com for access
+2. Put the downloaded models in the `./engagenet/models/` folder
+3. Make sure the names are `best.pt` and `angle_best.pt`
 
-## Tech Stack + Features
+#### UI
+1. Clone the whole repository and navigate to the `./client` folder
+2. Make sure you have `Node.js` and `npm/yarn` installed.
+3. Run `npm install` in the `./client` root directory to install all the dependecies
 
-https://user-images.githubusercontent.com/28986134/212368288-12f41e37-aa8c-4e0a-a542-cf6d23410a65.mp4
+#### Detection/Algorithm code
+1. Navigate to the `./engagenet` folder
+2. Make sure to have `python 3.9.6` installed.
+3. Activate a virtual env if you prefer it
+4. Run `pip install -r requirements.txt`
 
-### Frameworks
+### Usage
+###### At this point your folder should look like this
+<img width="126" alt="image" src="https://github.com/abhayc-glitch/EngageNet/assets/78511893/3796a406-edd9-47bd-9a43-cc76e11aa714">
 
-- [Next.js](https://nextjs.org/) – React framework for building performant apps with the best developer experience
-- [Auth.js](https://authjs.dev/) – Handle user authentication with ease with providers like Google, Twitter, GitHub, etc.
-- [Prisma](https://www.prisma.io/) – Typescript-first ORM for Node.js
 
-### Platforms
+1. I recommend having 3 different terminal windows - client, socket server and python detection code
+2. In the first window, navigate to the `./client` directory and run `npm run dev` to start the `NextJS` app
+3. In the second window and the same directory run `npm run start:socket`, this will start the socketIO server
+4. Now navigate to the `./engagenet` directory and run `python main.py`
+> ⚠️: **Make sure to connect your Webcam/Camera through USB**: Switch up the camera source in `main.py` if your camera is not being recognized
+5. Now drag the python window that pops with the live feed on top of the UI box that says place here
+> In the end it should look like this
+> 
+![Screenshot 2023-09-10 at 8 27 50 PM](https://github.com/abhayc-glitch/EngageNet/assets/78511893/8b7a01a3-9fb6-4e21-90f8-29790208eb2c)
 
-- [Vercel](https://vercel.com/) – Easily preview & deploy changes with git
-- [Vercel Postgres](https://vercel.com/postgres) – Serverless Postgres at the Edge
 
-### UI
+### CLI
+If you want to use just the CLI and not the UI, navigate to the `./engagenet` directory and run `python cli.py`
+> It should end up looking like this
+>
+<img width="796" alt="image" src="https://github.com/abhayc-glitch/EngageNet/assets/78511893/7af4c46b-4ac2-45aa-9b9a-383e48690d90">
 
-- [Tailwind CSS](https://tailwindcss.com/) – Utility-first CSS framework for rapid UI development
-- [Radix](https://www.radix-ui.com/) – Primitives like modal, popover, etc. to build a stellar user experience
-- [Framer Motion](https://framer.com/motion) – Motion library for React to animate components with ease
-- [Lucide](https://lucide.dev/) – Beautifully simple, pixel-perfect icons
-- [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) – Optimize custom fonts and remove external network requests for improved performance
-- [`ImageResponse`](https://beta.nextjs.org/docs/api-reference/image-response) – Generate dynamic Open Graph images at the edge
-- [`react-wrap-balancer`](https://github.com/shuding/react-wrap-balancer) – Simple React component that makes titles more readable
 
-### Hooks and Utilities
+## Code Flow
 
-- `useIntersectionObserver` –  React hook to observe when an element enters or leaves the viewport
-- `useLocalStorage` – Persist data in the browser's local storage
-- `useScroll` – React hook to observe scroll position ([example](https://github.com/steven-tey/precedent/blob/main/components/layout/navbar.tsx#L12))
-- `nFormatter` – Format numbers with suffixes like `1.2k` or `1.2M`
-- `capitalize` – Capitalize the first letter of a string
-- `truncate` – Truncate a string to a specified length
-- [`use-debounce`](https://www.npmjs.com/package/use-debounce) – Debounce a function call / state update
+### Real-time Frame Detection System
 
-### Code Quality
+#### 1. Data Collection:
+- **Objective:** Gather and annotate a dataset for training a model to assess crowd engagement and interaction health.
+- **Method:**
+  - Collect a dataset of approximately 200 crowd videos from a top-down camera perspective.
+  - Annotate videos with ground truth labels indicating levels of engagement or interaction health.
+  - Utilize this dataset for both Head Angle Calculation and Head Detection.
 
-- [TypeScript](https://www.typescriptlang.org/) – Static type checker for end-to-end typesafety
-- [Prettier](https://prettier.io/) – Opinionated code formatter for consistent code style
-- [ESLint](https://eslint.org/) – Pluggable linter for Next.js and TypeScript
+#### 2. Metrics for Detection (Summary):
+- **Proximity Branch:** 
+  - Calculate a proximity score indicating how close individuals are to each other.
+- **Angle/Cluster Branch:** 
+  - Determine engagement score based on head angles and spatial clustering.
+- **Headcount Branch:** 
+  - Count the number of heads in the image to assess crowd size.
+- **Overall Scoring:** 
+  - Combine scores from the above branches for a comprehensive engagement analysis.
 
-### Miscellaneous
+#### 3. Metrics for Detection - Detailed Approach:
+- **Head Orientation (50% of total score):** 
+  - Count total heads (N) and heads facing towards the group (F).
+  - Score = (F / N) * 100.
+- **Proximity Analysis (40% of total score):** 
+  - Calculate distances between heads using a distance matrix.
+  - Identify and score head clusters based on proximity.
+  - Normalize scores between 0 (minimal proximity) to 1 (maximum proximity).
+- **Headcount Branch (5% of total score):** 
+  - Simply count the number of heads in the scene.
 
-- [Vercel Analytics](https://vercel.com/analytics) – Track unique visitors, pageviews, and more in a privacy-friendly way
+#### 4. Angle Classes:
+- Representation of head orientation angles and their corresponding directions:
 
-## Author
+| Angle | Direction  |
+| ----- | ---------- |
+| 0     | Down       |
+| 45    | Down-Right |
+| 90    | Right      |
+| 135   | Up-Right   |
+| 180   | Up         |
+| 225   | Up-Left    |
+| 270   | Left       |
+| 315   | Down-Left  |
 
-- Steven Tey ([@steventey](https://twitter.com/steventey))
+#### 5. Angle Data:
+- Distribution of files across different angle classes:
+
+| Angle | Number of Files |
+| ----- | --------------- |
+| 0     | 2870            |
+| 45    | 2996            |
+| 90    | 2806            |
+| 135   | 2986            |
+| 180   | 2832            |
+| 225   | 2932            |
+| 270   | 2800            |
+| 315   | 2978            |
+
