@@ -171,5 +171,5 @@ cython_debug/
 /src/head_images
 /src/videos
 
-/new
-/labels
+/src/temp_cropped.jpg
+
