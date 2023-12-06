@@ -2,7 +2,7 @@ import cv2
 import threading
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import defaultdict
+import math
 
 import torch
 from ultralytics import YOLO
@@ -52,7 +52,7 @@ def get_head_angle(cropped_img):
     cv2.imwrite(cropped_img_path, cropped_img)
 
     # Load the model
-    model = YOLO("./models/angle_best.pt")
+    model = YOLO("../../models/angle_best.pt")
 
     # Get predictions
     results = model(cropped_img_path)  # results list
@@ -325,7 +325,7 @@ def display_score(stdscr, score, clusters, noise):
     # Refresh the screen
     stdscr.refresh()
 
-model = YOLO("./models/best.pt")
+model = YOLO("../../models/best.pt")
 
 # Rectangle color
 rect_color = (235, 64, 52)
@@ -399,6 +399,8 @@ def plot_cdf(data, title):
     plt.show()
 
 
+video_path="../main.mp4"
+
 def main(stdscr):
     model = YOLO("../../models/best.pt")
     rect_color = (235, 64, 52)
@@ -409,7 +411,8 @@ def main(stdscr):
     initial_frames = 0
     frame_counter = 0
 
-    for result in model.track(source=0, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
+
+    for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
         frame_counter += 1
         if frame_counter % 30 != 0:
             continue

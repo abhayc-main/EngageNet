@@ -8,10 +8,7 @@ import torch
 from ultralytics import YOLO
 import os
 
-import aiohttp
-import asyncio
-import base64
-import json
+import math
 import cv2
 
 # SSL certificate issues fix
@@ -52,7 +49,7 @@ def get_head_angle(cropped_img):
     cv2.imwrite(cropped_img_path, cropped_img)
 
     # Load the model
-    model = YOLO("./models/angle_best.pt")
+    model = YOLO("../models/angle_best.pt")
 
     # Get predictions
     results = model(cropped_img_path)  # results list
@@ -325,7 +322,7 @@ def display_score(stdscr, score, clusters, noise):
     # Refresh the screen
     stdscr.refresh()
 
-model = YOLO("./models/best.pt")
+model = YOLO("../models/best.pt")
 
 # Rectangle color
 rect_color = (235, 64, 52)
@@ -400,7 +397,7 @@ def plot_cdf(data, title):
 
 
 def main(stdscr):
-    model = YOLO("./models/best.pt")
+    model = YOLO("../models/best.pt")
     rect_color = (235, 64, 52)
     engagement_scores = []
     previous_clusters = None
