@@ -2,16 +2,13 @@ import cv2
 import threading
 import numpy as np
 import matplotlib.pyplot as plt
-import math
+from collections import defaultdict
 
 import torch
 from ultralytics import YOLO
 import os
 
-import aiohttp
-import asyncio
-import base64
-import json
+import math
 import cv2
 
 # SSL certificate issues fix
@@ -398,7 +395,6 @@ def plot_cdf(data, title):
     plt.grid(True)
     plt.show()
 
-
 video_path="../main.mp4"
 
 def main(stdscr):
@@ -410,7 +406,6 @@ def main(stdscr):
     no_cluster_frames = 0
     initial_frames = 0
     frame_counter = 0
-
 
     for result in model.track(source=video_path, show=True, stream=True, agnostic_nms=True, conf=0.25, iou=0.10):
         frame_counter += 1
