@@ -300,7 +300,7 @@ import threading
 sio = socketio.Client()
 sio.connect('http://localhost:3001')
 
-model = YOLO("./models/best.pt")
+model = YOLO("../../models/best.pt")
 rect_color = (235, 64, 52)
 engagement_scores = []
 previous_clusters = None
